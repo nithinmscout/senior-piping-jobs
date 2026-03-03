@@ -90,19 +90,65 @@ def experience_passes_filter(description: str) -> bool:
         return True
     return max(int(m) for m in matches) >= MIN_EXPERIENCE
 
+# ─────────────────────────────────────────────
+# SALARY CONVERTER  — approximate rates to INR
+# ─────────────────────────────────────────────
+APPROX_TO_INR = {
+    "GBP": 120,    # 1 GBP  ≈ ₹120
+    "USD": 92,     # 1 USD  ≈ ₹92
+    "SGD": 72,     # 1 SGD  ≈ ₹62
+    "MYR": 23,     # 1 MYR  ≈ ₹18
+    "AED": 25,     # 1 AED  ≈ ₹23
+    "SAR": 24,     # 1 SAR  ≈ ₹22
+    "QAR": 25,     # 1 QAR  ≈ ₹23
+    "INR": 1,      # already rupees
+}
 
-def safe_salary(job: dict, source: str) -> str:
-    if source == "adzuna":
-        min_s = job.get("salary_min")
-        max_s = job.get("salary_max")
-        if min_s or max_s:
-            return f"{min_s or '?'} – {max_s or '?'}"
-    elif source == "jooble":
-        salary = job.get("salary", "")
-        if salary and str(salary).strip() not in ("", "0"):
-            return str(salary).strip()
+def to_inr(value: float, region: str) -> int:
+    """Convert a salary number to INR based on region."""
+    currency_map = {
+        "UK":           "GBP",
+        "India":        "INR",
+        "Singapore":    "SGD",
+        "Malaysia":     "MYR",
+        "UAE":          "AED",
+        "Saudi Arabia": "SAR",
+        "Qatar":        "QAR",
+        "Gulf":         "AED",
+    }
+    currency = currency_map.get(region, "USD")
+    rate     = APPROX_TO_INR.get(currency, 83)
+    return int(value * rate)
+
+def format_inr(amount: int) -> str:
+    """Format a number as Indian rupees with ₹ symbol and lakh/crore notation."""
+    if amount >= 10_000_000:
+        return f"₹{amount/10_000_000:.1f} Cr/yr"
+    elif amount >= 100_000:
+        return f"₹{amount/100_000:.1f} L/yr"
+    else:
+        return f"₹{amount:,}/yr"
+
+def safe_salary(job: dict, source: str, region: str = "UK") -> str:
+    try:
+        if source == "adzuna":
+            min_s = job.get("salary_min")
+            max_s = job.get("salary_max")
+            if min_s or max_s:
+                min_inr = format_inr(to_inr(float(min_s or 0), region))
+                max_inr = format_inr(to_inr(float(max_s or 0), region))
+                return f"{min_inr} – {max_inr}"
+        elif source == "jooble":
+            salary = str(job.get("salary", "")).strip()
+            if salary and salary not in ("", "0"):
+                # extract first number from jooble salary string e.g. "85,000 USD"
+                nums = re.findall(r"[\d,]+", salary)
+                if nums:
+                    val = float(nums[0].replace(",", ""))
+                    return format_inr(to_inr(val, region))
+    except Exception:
+        pass
     return "N/A"
-
 
 # ─────────────────────────────────────────────
 # FETCHERS  (unchanged)
@@ -132,7 +178,7 @@ async def fetch_adzuna(client, country_code, region_name, app_id, app_key, query
                 "title":      title,
                 "company":    job.get("company", {}).get("display_name", "N/A"),
                 "location":   job.get("location", {}).get("display_name", "N/A"),
-                "salary":     safe_salary(job, "adzuna"),
+                "salary": safe_salary(job, "adzuna", region_name),
                 "url":        job.get("redirect_url", "N/A"),
                 "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
             })
@@ -168,7 +214,7 @@ async def fetch_jooble(client, country_code, region_name, api_key, query):
                 "title":      title,
                 "company":    job.get("company", "N/A"),
                 "location":   job.get("location", "N/A"),
-                "salary":     safe_salary(job, "jooble"),
+                "salary": safe_salary(job, "jooble", region_name),
                 "url":        job.get("link", "N/A"),
                 "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
             })
