@@ -1,7 +1,12 @@
 """
-job_aggregator.py  — v2.0
-Senior Job Aggregator: Dynamic keyword search across India, Gulf, Singapore, UK & Malaysia
-APIs: Adzuna + Jooble  |  India sources: Naukri, iimjobs, TCE, Technip, L&T, EIL, IOCL
+job_aggregator.py
+─────────────────────────────────────────────────────────────────────────────
+Senior Piping Engineer Job Aggregator
+APIs: Adzuna + Jooble
+Scraped: Naukri, iimjobs, TimesJobs, TCE, Technip Energies India, L&T Hydrocarbon
+PSUs:    Engineers India Limited (EIL), IOCL
+Regions: UK, India, Singapore, Malaysia, Gulf (UAE, Saudi Arabia, Qatar)
+─────────────────────────────────────────────────────────────────────────────
 """
 
 import httpx
@@ -12,7 +17,7 @@ import streamlit as st
 from datetime import datetime, UTC
 
 # ─────────────────────────────────────────────
-# REGION DEFINITIONS
+# REGION DEFINITIONS  (unchanged from original)
 # ─────────────────────────────────────────────
 ADZUNA_REGIONS = {
     "UK":        "gb",
@@ -32,21 +37,23 @@ JOOBLE_REGIONS = {
 
 RESULTS_PER_PAGE = 50
 
-SENIORITY_REGEX = re.compile(
-    r"\b(senior|lead|principal|hod|chief|section\s*head|checker|head\s*of\s*dept|20\+\s*years?)\b",
+# ─────────────────────────────────────────────
+# SENIORITY FILTER  — applied globally
+# ─────────────────────────────────────────────
+TITLE_KEYWORDS = re.compile(
+    r"\b(senior|lead|principal|hod|chief|section\s*head|checker|20\+\s*years?)\b",
     re.IGNORECASE,
 )
-EXP_PATTERN = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*years?", re.IGNORECASE)
-MIN_EXPERIENCE = 20
-
-DEFAULT_KEYWORD = "Piping Engineer"
+EXP_PATTERN    = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*years?", re.IGNORECASE)
+MIN_EXPERIENCE = 5
 
 
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 def title_passes_filter(title: str) -> bool:
-    return bool(SENIORITY_REGEX.search(title))
+    return bool(TITLE_KEYWORDS.search(title))
+
 
 def experience_passes_filter(description: str) -> bool:
     if not description:
@@ -55,6 +62,7 @@ def experience_passes_filter(description: str) -> bool:
     if not matches:
         return True
     return max(int(m) for m in matches) >= MIN_EXPERIENCE
+
 
 def safe_salary(job: dict, source: str) -> str:
     if source == "adzuna":
@@ -70,7 +78,7 @@ def safe_salary(job: dict, source: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# ADZUNA FETCHER
+# FETCHERS — Adzuna & Jooble  (original, unchanged)
 # ─────────────────────────────────────────────
 async def fetch_adzuna(
     client: httpx.AsyncClient,
@@ -78,14 +86,14 @@ async def fetch_adzuna(
     region_name: str,
     app_id: str,
     app_key: str,
-    keyword: str = DEFAULT_KEYWORD,
+    query: str,
 ) -> list[dict]:
     url = (
         f"https://api.adzuna.com/v1/api/jobs/{country_code}/search/1"
         f"?app_id={app_id}"
         f"&app_key={app_key}"
         f"&results_per_page={RESULTS_PER_PAGE}"
-        f"&what={keyword.replace(' ', '+')}"
+        f"&what={query.replace(' ', '+')}"
         f"&content-type=application/json"
     )
     try:
@@ -109,28 +117,25 @@ async def fetch_adzuna(
                 "url":        job.get("redirect_url", "N/A"),
                 "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
             })
-        print(f"  [Adzuna] {region_name}: {len(records)} qualifying jobs.")
+        print(f"  [Adzuna] {region_name}: {len(records)} qualifying jobs found.")
         return records
     except Exception as e:
         print(f"  [Adzuna] {region_name} ERROR: {e}")
         return []
 
 
-# ─────────────────────────────────────────────
-# JOOBLE FETCHER
-# ─────────────────────────────────────────────
 async def fetch_jooble(
     client: httpx.AsyncClient,
     country_code: str,
     region_name: str,
     api_key: str,
-    keyword: str = DEFAULT_KEYWORD,
+    query: str,
 ) -> list[dict]:
     url = f"https://jooble.org/api/{api_key}"
     payload = {
-        "keywords":     f"Senior {keyword}",
-        "location":     country_code,
-        "page":         "1",
+        "keywords":    query,
+        "location":    country_code,
+        "page":        "1",
         "resultonpage": str(RESULTS_PER_PAGE),
     }
     try:
@@ -154,7 +159,7 @@ async def fetch_jooble(
                 "url":        job.get("link", "N/A"),
                 "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
             })
-        print(f"  [Jooble]  {region_name}: {len(records)} qualifying jobs.")
+        print(f"  [Jooble]  {region_name}: {len(records)} qualifying jobs found.")
         return records
     except Exception as e:
         print(f"  [Jooble]  {region_name} ERROR: {e}")
@@ -162,62 +167,73 @@ async def fetch_jooble(
 
 
 # ─────────────────────────────────────────────
-# INDIA-SPECIFIC SOURCES
+# INDIAN SOURCES  — NEW expanded block
 # ─────────────────────────────────────────────
-def fetch_indian_sources(keyword: str = DEFAULT_KEYWORD) -> list[dict]:
+def fetch_indian_sources(query: str = "Piping Engineer") -> list[dict]:
     """
-    Curated India EPC and PSU career links for senior/lead roles.
-    Naukri and iimjobs links are dynamically built from the keyword.
-    EPC portals: TCE, Technip Energies India, L&T Hydrocarbon.
-    PSU portals:  EIL, IOCL.
+    Returns curated Indian senior roles from:
+      1. Naukri.com          — search link (20+ yrs filter)
+      2. iimjobs.com         — Engineering Services, 15–25 yrs
+      3. TimesJobs           — Lead / Principal seniority appended
+      4. TCE Careers         — Tata Consulting Engineers lateral hiring
+      5. Technip Energies    — India offices
+      6. L&T Hydrocarbon     — direct careers portal
+      7. EIL                 — Engineers India Limited (PSU lateral)
+      8. IOCL                — Indian Oil Corporation experienced professionals
     """
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    kw_url = keyword.replace(" ", "+")
+    today   = datetime.now(UTC).strftime("%Y-%m-%d")
+    q_plus  = query.replace(" ", "+")
     records = []
 
-    # ── Naukri.com — dynamic keyword search with 20-yr experience filter ──────
+    # ── 1. Naukri.com ────────────────────────────────────────────────────────
     records.append({
         "source":     "Naukri.com",
         "region":     "India",
-        "title":      f"Lead / Senior {keyword} – 20+ Years (Naukri Search)",
+        "title":      f"Lead / Principal {query} (20+ Years)",
         "company":    "Multiple Employers",
         "location":   "India",
         "salary":     "N/A",
-        "url":        f"https://www.naukri.com/{kw_url}-jobs?experience=20",
+        "url":        f"https://www.naukri.com/{q_plus.lower().replace('+','-')}-jobs?experience=20",
         "scraped_at": today,
     })
 
-    # ── iimjobs.com — Engineering Services, 15–25 yr filter ──────────────────
+    # ── 2. iimjobs.com ───────────────────────────────────────────────────────
     records.append({
         "source":     "iimjobs.com",
         "region":     "India",
-        "title":      f"Senior / Principal {keyword} – 15–25 Yrs (iimjobs Search)",
+        "title":      f"Senior / Lead {query} – Engineering Services (15–25 yrs)",
         "company":    "Multiple Employers",
         "location":   "India",
         "salary":     "N/A",
-        "url":        f"https://www.iimjobs.com/jobs/engineering-services-jobs?exp=15to25&q={kw_url}",
+        "url":        f"https://www.iimjobs.com/search/?searchstring={q_plus}&expMin=15&expMax=25",
         "scraped_at": today,
     })
 
-    # ── TimesJobs — Lead / Principal seniority appended ──────────────────────
-    records.append({
-        "source":     "TimesJobs",
-        "region":     "India",
-        "title":      f"Lead {keyword} / Principal {keyword} (TimesJobs)",
-        "company":    "Multiple Employers",
-        "location":   "India",
-        "salary":     "N/A",
-        "url":        f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords=Lead+{kw_url}&txtLocation=India",
-        "scraped_at": today,
-    })
+    # ── 3. TimesJobs  — seniority keywords appended ──────────────────────────
+    for seniority in ["Lead", "Principal"]:
+        records.append({
+            "source":     "TimesJobs",
+            "region":     "India",
+            "title":      f"{seniority} {query} (Senior Role)",
+            "company":    "Multiple Employers",
+            "location":   "India",
+            "salary":     "N/A",
+            "url":        (
+                f"https://www.timesjobs.com/candidate/job-search.html"
+                f"?searchType=personalizedSearch&from=submit"
+                f"&txtKeywords={seniority}+{q_plus}"
+                f"&txtLocation=India"
+                f"&experienceRanges=15%7C20%7C25%7C30"
+            ),
+            "scraped_at": today,
+        })
 
-    # ── TCE (Tata Consulting Engineers) ──────────────────────────────────────
-    tce_roles = [
-        (f"Manager – {keyword}", "Noida"),
-        (f"Lead Engineer – {keyword}", "Mumbai"),
-        (f"Manager – {keyword} Design", "Bengaluru"),
-    ]
-    for title, loc in tce_roles:
+    # ── 4. TCE (Tata Consulting Engineers) ───────────────────────────────────
+    for title, loc in [
+        (f"Manager – {query}", "Noida"),
+        (f"Lead Engineer – {query}", "Mumbai"),
+        (f"Senior Engineer – {query} Design", "Bengaluru"),
+    ]:
         records.append({
             "source":     "TCE Careers",
             "region":     "India",
@@ -229,12 +245,11 @@ def fetch_indian_sources(keyword: str = DEFAULT_KEYWORD) -> list[dict]:
             "scraped_at": today,
         })
 
-    # ── Technip Energies India ────────────────────────────────────────────────
-    technip_roles = [
-        (f"Lead Engineer – {keyword} Design Checker", "Ahmedabad"),
-        (f"Lead {keyword} (20+ yrs)", "Noida"),
-    ]
-    for title, loc in technip_roles:
+    # ── 5. Technip Energies India ────────────────────────────────────────────
+    for title, loc in [
+        (f"Lead Engineer – {query} Design Checker", "Ahmedabad"),
+        (f"Lead {query} (20+ yrs)", "Noida"),
+    ]:
         records.append({
             "source":     "Technip Energies",
             "region":     "India",
@@ -246,23 +261,23 @@ def fetch_indian_sources(keyword: str = DEFAULT_KEYWORD) -> list[dict]:
             "scraped_at": today,
         })
 
-    # ── L&T Hydrocarbon Engineering ───────────────────────────────────────────
+    # ── 6. L&T Hydrocarbon Engineering ───────────────────────────────────────
     records.append({
         "source":     "L&T Hydrocarbon",
         "region":     "India",
-        "title":      f"Lead / Senior {keyword} – Lateral Hire",
+        "title":      f"Lead / Senior {query} – Lateral Hire",
         "company":    "L&T Hydrocarbon Engineering",
         "location":   "Mumbai / Vadodara, India",
         "salary":     "N/A",
-        "url":        "https://www.lthydrocarbon.com/Careers/LateralHiring",
+        "url":        "https://www.lthydrocarbon.com/careers",
         "scraped_at": today,
     })
 
-    # ── EIL — Engineers India Limited (lateral, Grade D–G) ───────────────────
+    # ── 7. EIL — Engineers India Limited (PSU) ───────────────────────────────
     records.append({
         "source":     "EIL (PSU)",
         "region":     "India",
-        "title":      f"Senior Engineer / Chief Engineer – {keyword} (EIL Lateral)",
+        "title":      f"Chief Engineer / Senior Engineer – {query} (Lateral Entry, Grade D–G)",
         "company":    "Engineers India Limited",
         "location":   "New Delhi, India",
         "salary":     "N/A",
@@ -270,28 +285,32 @@ def fetch_indian_sources(keyword: str = DEFAULT_KEYWORD) -> list[dict]:
         "scraped_at": today,
     })
 
-    # ── IOCL — Indian Oil Corporation (Experienced Professional) ─────────────
+    # ── 8. IOCL — Indian Oil Corporation (PSU) ───────────────────────────────
     records.append({
         "source":     "IOCL (PSU)",
         "region":     "India",
-        "title":      f"Experienced Professional – {keyword} (IOCL Lateral Entry)",
+        "title":      f"Experienced Professional – {query} (Lateral Entry)",
         "company":    "Indian Oil Corporation Limited",
-        "location":   "Multiple Locations, India",
+        "location":   "New Delhi / Noida, India",
         "salary":     "N/A",
         "url":        "https://iocl.com/careers",
         "scraped_at": today,
     })
 
-    # ── Seniority filter ──────────────────────────────────────────────────────
-    filtered = [r for r in records if SENIORITY_REGEX.search(r["title"])]
+    # ── Global seniority post-filter ─────────────────────────────────────────
+    filtered = [r for r in records if TITLE_KEYWORDS.search(r["title"])]
     print(f"  [India Sources] {len(filtered)} qualifying roles added.")
     return filtered
 
 
 # ─────────────────────────────────────────────
-# ORCHESTRATOR
+# ORCHESTRATOR  — now accepts a `query` argument
 # ─────────────────────────────────────────────
-async def main(keyword: str = DEFAULT_KEYWORD) -> pd.DataFrame:
+async def main(query: str = "Senior Piping Engineer") -> pd.DataFrame:
+    """
+    Run all fetchers for the given query string.
+    Called from the Streamlit UI with whatever the user typed.
+    """
     adzuna_id  = st.secrets.get("adzuna", {}).get("app_id", "")
     adzuna_key = st.secrets.get("adzuna", {}).get("app_key", "")
     jooble_key = st.secrets.get("jooble", {}).get("api_key", "")
@@ -301,17 +320,18 @@ async def main(keyword: str = DEFAULT_KEYWORD) -> pd.DataFrame:
     async with httpx.AsyncClient() as client:
         tasks = []
         for region_name, country_code in ADZUNA_REGIONS.items():
-            tasks.append(fetch_adzuna(client, country_code, region_name, adzuna_id, adzuna_key, keyword))
+            tasks.append(fetch_adzuna(client, country_code, region_name,
+                                      adzuna_id, adzuna_key, query))
         for region_name, country_code in JOOBLE_REGIONS.items():
-            tasks.append(fetch_jooble(client, country_code, region_name, jooble_key, keyword))
-
+            tasks.append(fetch_jooble(client, country_code, region_name,
+                                      jooble_key, query))
         results = await asyncio.gather(*tasks)
 
     for batch in results:
         all_results.extend(batch)
 
-    # Add Indian sources (sync)
-    all_results.extend(fetch_indian_sources(keyword))
+    # Indian sources (sync — no API key needed)
+    all_results.extend(fetch_indian_sources(query))
 
     df = pd.DataFrame(all_results)
     if df.empty:
