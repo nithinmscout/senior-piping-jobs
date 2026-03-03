@@ -11,7 +11,6 @@ Run:
 import streamlit as st
 import pandas as pd
 import asyncio
-import re
 import sys
 
 from job_aggregator import main as fetch_jobs
@@ -132,7 +131,23 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
 }
 hr { border-color: #E2E8F0 !important; margin: 1rem 0; }
 .stSlider label, .stCheckbox label, .stSelectbox label { font-size: 18px !important; font-weight: 600 !important; }
+
+/* ── Fix: make typed text visible in search input ───── */
+input[type="text"],
+div[data-testid="stTextInput"] input {
+    color: #1A1A2E !important;
+    background-color: #FFFFFF !important;
+    font-size: 18px !important;
+    border: 2px solid #0057B8 !important;
+    border-radius: 6px !important;
+    padding: 8px 12px !important;
+}
+input[type="text"]::placeholder {
+    color: #9CA3AF !important;
+    opacity: 1 !important;
+}
 </style>
+
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
