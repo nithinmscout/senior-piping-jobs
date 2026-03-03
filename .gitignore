@@ -1,0 +1,19 @@
+# .gitignore
+# ─────────────────────────────────────────────────────────
+# Secrets — NEVER push to GitHub
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+*.csv
