@@ -47,13 +47,24 @@ TITLE_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
-# NEW: job must also mention at least one of these engineering/piping domain words
+# Job must contain at least one piping/oil-and-gas specific domain word
 DOMAIN_KEYWORDS = re.compile(
-    r"\b(pip(ing|e|es?)|stress|engineer(ing)?|epc|process|mechanical|"
-    r"plant|refin(ery|ing)|offshore|onshore|lng|feed|fpso|"
-    r"hydrocarbon|petrochemical|oil\s*&?\s*gas|pressure\s*vessel|"
-    r"isometric|caesar|pdms|sp3d|navisworks|checker|design|"
-    r"layout|3d\s*model|flow(line)?|piping\s*design)\b",
+    r"\b(pip(ing|e|es?)|pipe\s*stress|stress\s*analys|"
+    r"piping\s*(design|engineer|layout|checker|drafter|lead|head)|"
+    r"(lead|senior|principal|chief)\s*pip|"
+    r"epc|fpso|lng|refin(ery|ing)|petrochemical|hydrocarbon|"
+    r"oil\s*(and|&)\s*gas|upstream|downstream|midstream|"
+    r"caesar\s*ii?|pdms|sp3d|e3d|navisworks|isometric|"
+    r"pressure\s*vessel|process\s*plant|onshore|offshore)\b",
+    re.IGNORECASE,
+)
+
+# Block titles that clearly belong to unrelated fields
+EXCLUDE_KEYWORDS = re.compile(
+    r"\b(hvac|well(bore|head)?|drilling|electrical|civil|structural|"
+    r"instrument(ation)?|telecom|software|nurse|doctor|"
+    r"accountant|sales|marketing|supply\s*chain|logistics|"
+    r"warehouse|driver|security|plumber|plumbing)\b",
     re.IGNORECASE,
 )
 
@@ -62,7 +73,8 @@ MIN_EXPERIENCE = 8
 
 
 def title_passes_filter(title: str) -> bool:
-    # Must have a seniority word AND a piping/engineering domain word
+    if EXCLUDE_KEYWORDS.search(title):
+        return False
     return bool(TITLE_KEYWORDS.search(title)) and bool(DOMAIN_KEYWORDS.search(title))
 
 
@@ -163,6 +175,91 @@ async def fetch_jooble(client, country_code, region_name, api_key, query):
         print(f"  [Jooble]  {region_name} ERROR: {e}")
         return []
 
+# ─────────────────────────────────────────────
+# INDEED SCRAPER  (no API key needed)
+# Regions: UK, India, Singapore, Malaysia, UAE
+# ─────────────────────────────────────────────
+INDEED_REGIONS = {
+    "UK":        ("https://www.indeed.co.uk", "United+Kingdom"),
+    "India":     ("https://in.indeed.com",    "India"),
+    "Singapore": ("https://sg.indeed.com",    "Singapore"),
+    "Malaysia":  ("https://malaysia.indeed.com", "Malaysia"),
+    "UAE":       ("https://www.indeed.com",   "United+Arab+Emirates"),
+}
+
+def fetch_indeed(query: str = "Senior Piping Engineer") -> list[dict]:
+    import requests
+    from bs4 import BeautifulSoup
+    import time as _time
+
+    today  = datetime.now(UTC).strftime("%Y-%m-%d")
+    q_plus = query.replace(" ", "+")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    records = []
+
+    for region_name, (base_url, location) in INDEED_REGIONS.items():
+        url = f"{base_url}/jobs?q={q_plus}&l={location}&sort=date"
+        try:
+            resp = requests.get(url, headers=headers, timeout=12)
+            if resp.status_code != 200:
+                print(f"  [Indeed]  {region_name}: HTTP {resp.status_code} — skipping.")
+                continue
+
+            soup  = BeautifulSoup(resp.text, "lxml")
+            cards = soup.select("div.job_seen_beacon, li.css-5lfssm")
+            if not cards:
+                cards = soup.select("div[data-jk]")
+
+            count = 0
+            for card in cards:
+                title_el = card.select_one("h2.jobTitle span, h2 a span")
+                title    = title_el.get_text(strip=True) if title_el else ""
+                if not title or not title_passes_filter(title):
+                    continue
+
+                company_el    = card.select_one("span.companyName, [data-testid='company-name']")
+                company       = company_el.get_text(strip=True) if company_el else "N/A"
+
+                loc_el        = card.select_one("div.companyLocation, [data-testid='text-location']")
+                location_text = loc_el.get_text(strip=True) if loc_el else region_name
+
+                link_el  = card.select_one("h2.jobTitle a, h2 a")
+                job_path = link_el["href"] if link_el and link_el.get("href") else ""
+                job_url  = (
+                    f"{base_url}{job_path}" if job_path.startswith("/")
+                    else job_path if job_path.startswith("http")
+                    else base_url
+                )
+
+                sal_el = card.select_one("div.salary-snippet-container")
+                salary = sal_el.get_text(strip=True) if sal_el else "N/A"
+
+                records.append({
+                    "source":     "Indeed",
+                    "region":     region_name,
+                    "title":      title,
+                    "company":    company,
+                    "location":   location_text,
+                    "salary":     salary,
+                    "url":        job_url,
+                    "scraped_at": today,
+                })
+                count += 1
+
+            print(f"  [Indeed]  {region_name}: {count} qualifying jobs found.")
+            _time.sleep(1.5)
+
+        except Exception as e:
+            print(f"  [Indeed]  {region_name} ERROR: {e}")
+
+    return records
 
 # ─────────────────────────────────────────────
 # INDIAN SOURCES  — ALL URLS FIXED
@@ -336,6 +433,7 @@ async def main(query: str = "Senior Piping Engineer") -> pd.DataFrame:
         all_results.extend(batch)
 
     all_results.extend(fetch_indian_sources(query))
+    all_results.extend(fetch_indeed(query))     # ← ADD THIS LINE
 
     df = pd.DataFrame(all_results)
     if df.empty:
