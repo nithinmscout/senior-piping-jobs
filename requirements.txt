@@ -12,3 +12,6 @@ pandas>=2.2.0
 
 # TOML parsing (secrets — built into Python 3.11+, belt-and-braces below)
 tomli>=2.0.1; python_version < "3.11"
+
+beautifulsoup4>=4.12.0
+lxml>=5.1.0

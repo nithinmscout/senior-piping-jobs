@@ -356,7 +356,7 @@ def render_job_card(row: pd.Series) -> None:
            target="_blank"
            rel="noopener noreferrer"
            aria-label="Apply for {row['title']} at {row['company']} — opens in new tab">
-            🔗 Apply on Company Website
+            🔗 Apply on {row['source']} Website
         </a>
     </div>
     """, unsafe_allow_html=True)
@@ -496,7 +496,7 @@ else:
 st.markdown("---")
 st.markdown(
     "<div style='text-align:center; color:#9CA3AF; font-size:0.9rem;'>"
-    "Data sourced from Adzuna & Jooble APIs · "
+    "Data sourced from Adzuna, Jooble, Naukri, iimjobs, TCE, Technip Energies & EIL · "
     "Links resolved via job_link_resolver · "
     "Listings refreshed daily"
     "</div>",

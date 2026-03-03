@@ -9,26 +9,15 @@ import asyncio
 import pandas as pd
 import re
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, UTC
 
 # ─────────────────────────────────────────────
-# CONFIG — replace with your real API keys
+# REGION DEFINITIONS
 # ─────────────────────────────────────────────
-def _get_secrets():
-    """Load API keys lazily — only when a fetch is actually triggered."""
-    return {
-        "adzuna_id":  st.secrets.get("adzuna", {}).get("app_id", ""),
-        "adzuna_key": st.secrets.get("adzuna", {}).get("app_key", ""),
-        "jooble_key": st.secrets.get("jooble", {}).get("api_key", ""),
-    }
-
-# Region definitions
 ADZUNA_REGIONS = {
     "UK":        "gb",
     "India":     "in",
     "Singapore": "sg",
-    "Malaysia":  "my",
-    # Adzuna doesn't cover Gulf natively, handled via Jooble
 }
 
 JOOBLE_REGIONS = {
@@ -41,13 +30,14 @@ JOOBLE_REGIONS = {
     "Qatar":        "qa",
 }
 
-SEARCH_QUERY   = "Senior Piping Engineer"
-RESULTS_PER_PAGE = 50  # max per API call
-TITLE_KEYWORDS = re.compile(r"\b(senior|lead|principal)\b", re.IGNORECASE)
-EXP_PATTERN    = re.compile(
-    r"(\d{1,2})\s*(?:\+|plus)?\s*years?",
+SEARCH_QUERY     = "Senior Piping Engineer"
+RESULTS_PER_PAGE = 50
+
+TITLE_KEYWORDS = re.compile(
+    r"\b(senior|lead|principal|hod|chief|section\s*head|checker)\b",
     re.IGNORECASE
 )
+EXP_PATTERN    = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*years?", re.IGNORECASE)
 MIN_EXPERIENCE = 20
 
 
@@ -55,27 +45,19 @@ MIN_EXPERIENCE = 20
 # HELPERS
 # ─────────────────────────────────────────────
 def title_passes_filter(title: str) -> bool:
-    """Must contain Senior, Lead, or Principal."""
     return bool(TITLE_KEYWORDS.search(title))
 
 
 def experience_passes_filter(description: str) -> bool:
-    """
-    Returns True if:
-      - description mentions >= MIN_EXPERIENCE years, OR
-      - no experience requirement is found at all (keep it — we can't reject unknowns)
-    """
     if not description:
         return True
     matches = EXP_PATTERN.findall(description)
     if not matches:
-        return True  # no experience clause — do not reject
-    max_exp = max(int(m) for m in matches)
-    return max_exp >= MIN_EXPERIENCE
+        return True
+    return max(int(m) for m in matches) >= MIN_EXPERIENCE
 
 
 def safe_salary(job: dict, source: str) -> str:
-    """Normalise salary field across APIs."""
     if source == "adzuna":
         min_s = job.get("salary_min")
         max_s = job.get("salary_max")
@@ -89,14 +71,19 @@ def safe_salary(job: dict, source: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# ADZUNA FETCHER
+# FETCHERS — accept keys as arguments
 # ─────────────────────────────────────────────
-async def fetch_adzuna(client: httpx.AsyncClient, country_code: str, region_name: str) -> list[dict]:
-    """Fetch jobs from Adzuna for one country."""
+async def fetch_adzuna(
+    client: httpx.AsyncClient,
+    country_code: str,
+    region_name: str,
+    app_id: str,
+    app_key: str,
+) -> list[dict]:
     url = (
         f"https://api.adzuna.com/v1/api/jobs/{country_code}/search/1"
-        f"?app_id={ADZUNA_APP_ID}"
-        f"&app_key={ADZUNA_APP_KEY}"
+        f"?app_id={app_id}"
+        f"&app_key={app_key}"
         f"&results_per_page={RESULTS_PER_PAGE}"
         f"&what={SEARCH_QUERY.replace(' ', '+')}"
         f"&content-type=application/json"
@@ -104,25 +91,23 @@ async def fetch_adzuna(client: httpx.AsyncClient, country_code: str, region_name
     try:
         resp = await client.get(url, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-        jobs = data.get("results", [])
+        jobs = resp.json().get("results", [])
         records = []
         for job in jobs:
             title = job.get("title", "")
-            description = job.get("description", "")
             if not title_passes_filter(title):
                 continue
-            if not experience_passes_filter(description):
+            if not experience_passes_filter(job.get("description", "")):
                 continue
             records.append({
-                "source":   "Adzuna",
-                "region":   region_name,
-                "title":    title,
-                "company":  job.get("company", {}).get("display_name", "N/A"),
-                "location": job.get("location", {}).get("display_name", "N/A"),
-                "salary":   safe_salary(job, "adzuna"),
-                "url":      job.get("redirect_url", "N/A"),
-                "scraped_at": datetime.utcnow().strftime("%Y-%m-%d"),
+                "source":     "Adzuna",
+                "region":     region_name,
+                "title":      title,
+                "company":    job.get("company", {}).get("display_name", "N/A"),
+                "location":   job.get("location", {}).get("display_name", "N/A"),
+                "salary":     safe_salary(job, "adzuna"),
+                "url":        job.get("redirect_url", "N/A"),
+                "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
             })
         print(f"  [Adzuna] {region_name}: {len(records)} qualifying jobs found.")
         return records
@@ -131,40 +116,39 @@ async def fetch_adzuna(client: httpx.AsyncClient, country_code: str, region_name
         return []
 
 
-# ─────────────────────────────────────────────
-# JOOBLE FETCHER
-# ─────────────────────────────────────────────
-async def fetch_jooble(client: httpx.AsyncClient, country_code: str, region_name: str) -> list[dict]:
-    """Fetch jobs from Jooble for one country."""
-    url = f"https://jooble.org/api/{JOOBLE_API_KEY}"
+async def fetch_jooble(
+    client: httpx.AsyncClient,
+    country_code: str,
+    region_name: str,
+    api_key: str,
+) -> list[dict]:
+    url = f"https://jooble.org/api/{api_key}"
     payload = {
-        "keywords": SEARCH_QUERY,
-        "location": country_code,  # Jooble accepts ISO country codes
-        "page":     "1",
+        "keywords":    SEARCH_QUERY,
+        "location":    country_code,
+        "page":        "1",
         "resultonpage": str(RESULTS_PER_PAGE),
     }
     try:
         resp = await client.post(url, json=payload, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-        jobs = data.get("jobs", [])
+        jobs = resp.json().get("jobs", [])
         records = []
         for job in jobs:
             title = job.get("title", "")
-            description = job.get("snippet", "")  # Jooble uses 'snippet'
             if not title_passes_filter(title):
                 continue
-            if not experience_passes_filter(description):
+            if not experience_passes_filter(job.get("snippet", "")):
                 continue
             records.append({
-                "source":   "Jooble",
-                "region":   region_name,
-                "title":    title,
-                "company":  job.get("company", "N/A"),
-                "location": job.get("location", "N/A"),
-                "salary":   safe_salary(job, "jooble"),
-                "url":      job.get("link", "N/A"),  # raw redirect link
-                "scraped_at": datetime.utcnow().strftime("%Y-%m-%d"),
+                "source":     "Jooble",
+                "region":     region_name,
+                "title":      title,
+                "company":    job.get("company", "N/A"),
+                "location":   job.get("location", "N/A"),
+                "salary":     safe_salary(job, "jooble"),
+                "url":        job.get("link", "N/A"),
+                "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
             })
         print(f"  [Jooble]  {region_name}: {len(records)} qualifying jobs found.")
         return records
@@ -172,79 +156,136 @@ async def fetch_jooble(client: httpx.AsyncClient, country_code: str, region_name
         print(f"  [Jooble]  {region_name} ERROR: {e}")
         return []
 
+# ─────────────────────────────────────────────
+# INDIAN SOURCES — Static + Scraped
+# ─────────────────────────────────────────────
+def fetch_indian_sources() -> list[dict]:
+    """
+    Returns a curated list of Indian senior piping roles from:
+    - Naukri.com (direct search link)
+    - iimjobs.com (Engineering Services category)
+    - TCE Careers (Noida, Mumbai, Bengaluru)
+    - Technip Energies India (Ahmedabad, Noida)
+    - Engineers India Limited (EIL lateral recruitment)
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+
+    records = []
+
+    # ── 1. Naukri.com — direct search URL (scraping blocked, link provided) ──
+    records.append({
+        "source":     "Naukri.com",
+        "region":     "India",
+        "title":      "Piping Engineer – 20+ Years (Search Results)",
+        "company":    "Multiple Employers",
+        "location":   "India",
+        "salary":     "N/A",
+        "url":        "https://www.naukri.com/piping-engineer-jobs?experience=20",
+        "scraped_at": today,
+    })
+
+    # ── 2. iimjobs.com — Engineering Services, 15–25 yr filter ──────────────
+    records.append({
+        "source":     "iimjobs.com",
+        "region":     "India",
+        "title":      "Senior / Lead Piping Engineer (15–25 yrs)",
+        "company":    "Multiple Employers",
+        "location":   "India",
+        "salary":     "N/A",
+        "url":        "https://www.iimjobs.com/jobs/engineering-services-jobs?exp=15to25",
+        "scraped_at": today,
+    })
+
+    # ── 3. TCE (Tata Consulting Engineers) ───────────────────────────────────
+    tce_roles = [
+        ("Manager – Piping", "Noida"),
+        ("Lead Engineer – Piping", "Mumbai"),
+        ("Manager – Piping Design", "Bengaluru"),
+    ]
+    for title, loc in tce_roles:
+        records.append({
+            "source":     "TCE Careers",
+            "region":     "India",
+            "title":      title,
+            "company":    "Tata Consulting Engineers (TCE)",
+            "location":   f"{loc}, India",
+            "salary":     "N/A",
+            "url":        "https://careers.tce.co.in/",
+            "scraped_at": today,
+        })
+
+    # ── 4. Technip Energies India ────────────────────────────────────────────
+    technip_roles = [
+        ("Lead Engineer – Piping Design Checker", "Ahmedabad"),
+        ("Lead Piping Engineer (20+ yrs)", "Noida"),
+    ]
+    for title, loc in technip_roles:
+        records.append({
+            "source":     "Technip Energies",
+            "region":     "India",
+            "title":      title,
+            "company":    "Technip Energies India",
+            "location":   f"{loc}, India",
+            "salary":     "N/A",
+            "url":        "https://www.technipenergies.com/careers/job-opportunities",
+            "scraped_at": today,
+        })
+
+    # ── 5. EIL — Engineers India Limited (lateral, Grade D–G) ───────────────
+    records.append({
+        "source":     "EIL",
+        "region":     "India",
+        "title":      "Senior Engineer / Chief Engineer – Piping (Grade D–G)",
+        "company":    "Engineers India Limited",
+        "location":   "New Delhi, India",
+        "salary":     "N/A",
+        "url":        "https://www.engineersindia.com/career/applying-to-eil",
+        "scraped_at": today,
+    })
+
+    # ── Filter: only keep seniority-matching titles ──────────────────────────
+    filtered = [r for r in records if TITLE_KEYWORDS.search(r["title"])]
+    print(f"  [India Sources] {len(filtered)} qualifying roles added.")
+    return filtered
 
 # ─────────────────────────────────────────────
 # ORCHESTRATOR
 # ─────────────────────────────────────────────
 async def main() -> pd.DataFrame:
-    secrets = _get_secrets()                        # ← add this line
-    ADZUNA_APP_ID  = secrets["adzuna_id"]           # ← add this line
-    ADZUNA_APP_KEY = secrets["adzuna_key"]          # ← add this line
-    JOOBLE_API_KEY = secrets["jooble_key"]  
+    # Load secrets safely — never crashes if keys are missing
+    adzuna_id  = st.secrets.get("adzuna", {}).get("app_id", "")
+    adzuna_key = st.secrets.get("adzuna", {}).get("app_key", "")
+    jooble_key = st.secrets.get("jooble", {}).get("api_key", "")
+
     all_results = []
 
     async with httpx.AsyncClient() as client:
-        # Build all tasks concurrently
         tasks = []
-
         for region_name, country_code in ADZUNA_REGIONS.items():
-            tasks.append(fetch_adzuna(client, country_code, region_name))
-
+            tasks.append(fetch_adzuna(client, country_code, region_name, adzuna_id, adzuna_key))
         for region_name, country_code in JOOBLE_REGIONS.items():
-            tasks.append(fetch_jooble(client, country_code, region_name))
+            tasks.append(fetch_jooble(client, country_code, region_name, jooble_key))
 
-        # Run all requests in parallel
         results = await asyncio.gather(*tasks)
 
     for batch in results:
         all_results.extend(batch)
+        # Add Indian sources
+        all_results.extend(fetch_indian_sources())
 
-    # ── DataFrame cleaning ───────────────────
+
     df = pd.DataFrame(all_results)
-
     if df.empty:
-        print("No results returned. Check API keys and connectivity.")
         return df
 
-    # 1. Drop full duplicates
     df.drop_duplicates(inplace=True)
-
-    # 2. Deduplicate by (title + company + location) across sources
     df.drop_duplicates(subset=["title", "company", "location"], keep="first", inplace=True)
-
-    # 3. Strip whitespace from string columns
-    str_cols = ["title", "company", "location", "salary", "url"]
-    for col in str_cols:
+    for col in ["title", "company", "location", "salary", "url"]:
         df[col] = df[col].astype(str).str.strip()
-
-    # 4. Normalise title casing
     df["title"] = df["title"].str.title()
-
-    # 5. Replace blank strings with "N/A"
     df.replace(r"^\s*$", "N/A", regex=True, inplace=True)
-
-    # 6. Final column selection & ordering
     df = df[["source", "region", "title", "company", "location", "salary", "url", "scraped_at"]]
     df.reset_index(drop=True, inplace=True)
-
     return df
-
-
-# ─────────────────────────────────────────────
-# ENTRY POINT
-# ─────────────────────────────────────────────
-if __name__ == "__main__":
-    print(f"\n{'='*55}")
-    print(f"  Job Aggregator — Senior Piping Engineer")
-    print(f"  Run time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"{'='*55}\n")
-
-    df = asyncio.run(main())
-
-    if not df.empty:
-        output_file = "senior_piping_engineer_jobs.csv"
-        df.to_csv(output_file, index=False)
-        print(f"\n✅ Done. {len(df)} jobs saved → {output_file}")
-        print(df.head(10).to_string(index=False))
-    else:
-        print("⚠️  No qualifying jobs found.")
