@@ -71,12 +71,15 @@ EXCLUDE_KEYWORDS = re.compile(
 EXP_PATTERN    = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*years?", re.IGNORECASE)
 MIN_EXPERIENCE = 8
 
-
-def title_passes_filter(title: str) -> bool:
+def title_passes_filter(title: str, query: str = "") -> bool:
     if EXCLUDE_KEYWORDS.search(title):
         return False
-    return bool(TITLE_KEYWORDS.search(title)) and bool(DOMAIN_KEYWORDS.search(title))
-
+    if not TITLE_KEYWORDS.search(title):
+        return False
+    # If the user's own query contains a domain word, trust it — don't double-filter
+    if query and DOMAIN_KEYWORDS.search(query):
+        return True
+    return bool(DOMAIN_KEYWORDS.search(title))
 
 
 def experience_passes_filter(description: str) -> bool:
@@ -119,7 +122,7 @@ async def fetch_adzuna(client, country_code, region_name, app_id, app_key, query
         records = []
         for job in jobs:
             title = job.get("title", "")
-            if not title_passes_filter(title):
+            if not title_passes_filter(title, query):
                 continue
             if not experience_passes_filter(job.get("description", "")):
                 continue
@@ -155,7 +158,7 @@ async def fetch_jooble(client, country_code, region_name, api_key, query):
         records = []
         for job in jobs:
             title = job.get("title", "")
-            if not title_passes_filter(title):
+            if not title_passes_filter(title, query):
                 continue
             if not experience_passes_filter(job.get("snippet", "")):
                 continue
@@ -221,7 +224,7 @@ def fetch_indeed(query: str = "Senior Piping Engineer") -> list[dict]:
             for card in cards:
                 title_el = card.select_one("h2.jobTitle span, h2 a span")
                 title    = title_el.get_text(strip=True) if title_el else ""
-                if not title or not title_passes_filter(title):
+                if not title or not title_passes_filter(title, query):
                     continue
 
                 company_el    = card.select_one("span.companyName, [data-testid='company-name']")
