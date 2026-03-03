@@ -46,12 +46,25 @@ TITLE_KEYWORDS = re.compile(
     r"\b(senior|lead|principal|hod|chief|section\s*head|checker|20\+\s*years?)\b",
     re.IGNORECASE,
 )
+
+# NEW: job must also mention at least one of these engineering/piping domain words
+DOMAIN_KEYWORDS = re.compile(
+    r"\b(pip(ing|e|es?)|stress|engineer(ing)?|epc|process|mechanical|"
+    r"plant|refin(ery|ing)|offshore|onshore|lng|feed|fpso|"
+    r"hydrocarbon|petrochemical|oil\s*&?\s*gas|pressure\s*vessel|"
+    r"isometric|caesar|pdms|sp3d|navisworks|checker|design|"
+    r"layout|3d\s*model|flow(line)?|piping\s*design)\b",
+    re.IGNORECASE,
+)
+
 EXP_PATTERN    = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*years?", re.IGNORECASE)
-MIN_EXPERIENCE = 20
+MIN_EXPERIENCE = 8
 
 
 def title_passes_filter(title: str) -> bool:
-    return bool(TITLE_KEYWORDS.search(title))
+    # Must have a seniority word AND a piping/engineering domain word
+    return bool(TITLE_KEYWORDS.search(title)) and bool(DOMAIN_KEYWORDS.search(title))
+
 
 
 def experience_passes_filter(description: str) -> bool:
