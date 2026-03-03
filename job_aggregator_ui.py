@@ -1,69 +1,69 @@
+
 """
-job_aggregator_ui.py
-─────────────────────────────────────────────────────────────────────────────
-Streamlit UI for the Senior Piping Engineer Job Aggregator.
-Senior-friendly UX: 18px+ fonts, high-contrast, row-based job cards.
-─────────────────────────────────────────────────────────────────────────────
-Run:
-    streamlit run job_aggregator_ui.py
+job_aggregator_ui.py  — v2.0
+Senior Job Aggregator UI — Dynamic keyword search, Indian sources, senior-friendly UX.
+Run:  streamlit run job_aggregator_ui.py
 """
 
 import streamlit as st
 import pandas as pd
 import asyncio
 import sys
-import os
 
-# ── Local module imports (place in same directory) ───────────────────────────
-# from job_aggregator import main as fetch_jobs        # async aggregator
-# from job_link_resolver import get_direct_link        # URL resolver
+from job_aggregator import main as fetch_jobs
+from job_link_resolver import get_direct_link
 
 # ─────────────────────────────────────────────
-# PAGE CONFIG — must be first Streamlit call
+# PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Senior Piping Engineer Jobs",
+    page_title="Senior Engineer Jobs",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ─────────────────────────────────────────────
-# GLOBAL STYLES
-# Senior-friendly: min 18px fonts, WCAG AA contrast ratios,
-# clear focus rings, no animations, no hidden menus.
+# GLOBAL STYLES — Senior-friendly (18–22px fonts, WCAG AA contrast)
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Base font & background ──────────────────────────────────────────────── */
 html, body, [class*="css"] {
-    font-size: 18px !important;
+    font-size: 19px !important;
     font-family: 'Segoe UI', Arial, sans-serif !important;
     background-color: #F7F9FC !important;
     color: #1A1A2E !important;
 }
-
-/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+/* ── Top search bar strip ─────────────────────────────────────────────────── */
+.top-bar {
+    background-color: #0057B8;
+    padding: 1rem 1.6rem;
+    border-radius: 10px;
+    margin-bottom: 1.4rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
 section[data-testid="stSidebar"] {
     background-color: #1A1A2E !important;
     color: #FFFFFF !important;
     padding: 1.5rem 1rem !important;
 }
-section[data-testid="stSidebar"] * {
-    color: #FFFFFF !important;
-    font-size: 18px !important;
-}
-section[data-testid="stSidebar"] .stCheckbox label {
-    font-size: 18px !important;
-    font-weight: 500;
-}
-
-/* ── Main headings ───────────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] * { color: #FFFFFF !important; font-size: 18px !important; }
+/* ── Headings ─────────────────────────────────────────────────────────────── */
 h1 { font-size: 2rem !important; font-weight: 700; color: #1A1A2E !important; }
-h2 { font-size: 1.6rem !important; font-weight: 600; color: #1A1A2E !important; }
-h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; }
-
-/* ── Job card container ──────────────────────────────────────────────────── */
+h2 { font-size: 1.6rem !important; font-weight: 600; }
+h3 { font-size: 1.3rem !important; font-weight: 600; }
+/* ── Breadcrumb ───────────────────────────────────────────────────────────── */
+.breadcrumb {
+    font-size: 0.95rem;
+    color: #4A5568;
+    margin-bottom: 0.8rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #E2E8F0;
+}
+/* ── Job card ─────────────────────────────────────────────────────────────── */
 .job-card {
     background-color: #FFFFFF;
     border: 2px solid #D0D8E8;
@@ -73,37 +73,32 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
     margin-bottom: 1.2rem;
     box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
-.job-card:hover {
-    border-left-color: #003D82;
-    box-shadow: 0 4px 14px rgba(0,87,184,0.12);
-}
-
-/* ── Job title ───────────────────────────────────────────────────────────── */
+.job-card:hover { border-left-color: #003D82; box-shadow: 0 4px 14px rgba(0,87,184,0.12); }
+/* ── Job title ────────────────────────────────────────────────────────────── */
 .job-title {
-    font-size: 1.25rem !important;
+    font-size: 1.3rem !important;
     font-weight: 700;
     color: #1A1A2E;
     margin-bottom: 0.3rem;
+    line-height: 1.4;
 }
-
-/* ── Meta row (company · location · source) ──────────────────────────────── */
+/* ── Meta ─────────────────────────────────────────────────────────────────── */
 .job-meta {
-    font-size: 1rem !important;
-    color: #4A5568;
+    font-size: 1.05rem !important;
+    color: #374151;
     margin-bottom: 0.6rem;
-    line-height: 1.6;
+    line-height: 1.7;
 }
 .job-meta strong { color: #1A1A2E; }
-
-/* ── Salary badge ────────────────────────────────────────────────────────── */
+/* ── Salary badge ─────────────────────────────────────────────────────────── */
 .salary-badge {
     display: inline-block;
-    background-color: #E8F4E8;
-    color: #1B5E20;
-    border: 1px solid #A5D6A7;
+    background-color: #D1FAE5;
+    color: #065F46;
+    border: 1px solid #6EE7B7;
     border-radius: 20px;
     padding: 3px 14px;
-    font-size: 0.95rem !important;
+    font-size: 1rem !important;
     font-weight: 600;
     margin-bottom: 0.8rem;
 }
@@ -114,11 +109,10 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
     border: 1px solid #D1D5DB;
     border-radius: 20px;
     padding: 3px 14px;
-    font-size: 0.95rem !important;
+    font-size: 1rem !important;
     margin-bottom: 0.8rem;
 }
-
-/* ── Region tag ──────────────────────────────────────────────────────────── */
+/* ── Region tag ───────────────────────────────────────────────────────────── */
 .region-tag {
     display: inline-block;
     background-color: #EFF6FF;
@@ -126,38 +120,39 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
     border: 1px solid #BFDBFE;
     border-radius: 20px;
     padding: 3px 12px;
-    font-size: 0.9rem !important;
+    font-size: 0.95rem !important;
     font-weight: 600;
     margin-left: 8px;
 }
-
-/* ── Apply button ────────────────────────────────────────────────────────── */
+/* ── Apply button — LARGE, high-contrast ──────────────────────────────────── */
 .apply-btn {
     display: inline-block;
     background-color: #0057B8;
     color: #FFFFFF !important;
-    font-size: 1.05rem !important;
+    font-size: 1.1rem !important;
     font-weight: 700;
-    padding: 12px 28px;
+    padding: 14px 32px;
     border-radius: 8px;
     text-decoration: none !important;
     border: 3px solid transparent;
     cursor: pointer;
     margin-top: 0.6rem;
-    transition: none;   /* no animation — senior-friendly */
     letter-spacing: 0.3px;
 }
-.apply-btn:hover {
-    background-color: #003D82;
-    border-color: #001F4D;
-    color: #FFFFFF !important;
+.apply-btn:hover { background-color: #003D82; border-color: #001F4D; }
+.apply-btn:focus { outline: 4px solid #F59E0B; outline-offset: 3px; }
+/* ── Stats bar ────────────────────────────────────────────────────────────── */
+.stats-bar {
+    background-color: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
+    padding: 0.8rem 1.2rem;
+    margin-bottom: 1.4rem;
+    font-size: 1.05rem !important;
+    color: #1D4ED8;
+    font-weight: 600;
 }
-.apply-btn:focus {
-    outline: 4px solid #F59E0B;   /* high-visibility focus ring */
-    outline-offset: 3px;
-}
-
-/* ── No results banner ───────────────────────────────────────────────────── */
+/* ── No results ───────────────────────────────────────────────────────────── */
 .no-results {
     text-align: center;
     padding: 3rem;
@@ -168,166 +163,66 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
     border-radius: 10px;
     margin-top: 1.5rem;
 }
-
-/* ── Stats bar ───────────────────────────────────────────────────────────── */
-.stats-bar {
-    background-color: #EFF6FF;
-    border: 1px solid #BFDBFE;
-    border-radius: 8px;
-    padding: 0.8rem 1.2rem;
-    margin-bottom: 1.4rem;
-    font-size: 1rem !important;
-    color: #1D4ED8;
-    font-weight: 600;
-}
-
-/* ── Dividers ────────────────────────────────────────────────────────────── */
 hr { border-color: #E2E8F0 !important; margin: 1rem 0; }
-
-/* ── Streamlit widget labels ─────────────────────────────────────────────── */
-.stSlider label, .stCheckbox label, .stSelectbox label {
+.stSlider label, .stCheckbox label, .stSelectbox label, .stTextInput label {
     font-size: 18px !important;
     font-weight: 600 !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
+# ─────────────────────────────────────────────
+# SESSION STATE — keyword persistence
+# ─────────────────────────────────────────────
+if "keyword" not in st.session_state:
+    st.session_state["keyword"] = "Piping Engineer"
+if "jobs_df" not in st.session_state:
+    st.session_state["jobs_df"] = pd.DataFrame()
+if "last_keyword" not in st.session_state:
+    st.session_state["last_keyword"] = ""
 
 # ─────────────────────────────────────────────
-# MOCK DATA — replace with real aggregator output
-# Swap this block with:
-#   df = asyncio.run(fetch_jobs())
-#   df["final_url"] = df["url"].apply(get_direct_link)
+# PERSISTENT TOP BAR (breadcrumb + search)
 # ─────────────────────────────────────────────
-@st.cache_data(show_spinner=False)
-def load_mock_data() -> pd.DataFrame:
-    return pd.DataFrame([
-        {
-            "title":       "Senior Piping Engineer",
-            "company":     "Shell Global Solutions",
-            "location":    "Aberdeen, UK",
-            "region":      "UK",
-            "salary":      "75000 – 95000",
-            "salary_num":  75000,
-            "source":      "Adzuna",
-            "final_url":   "https://careers.shell.com/",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Lead Piping Engineer",
-            "company":     "Petrofac",
-            "location":    "Aberdeen, UK",
-            "region":      "UK",
-            "salary":      "80000 – 100000",
-            "salary_num":  80000,
-            "source":      "Jooble",
-            "final_url":   "https://www.petrofac.com/careers/",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Principal Piping Engineer",
-            "company":     "Worley",
-            "location":    "Mumbai, India",
-            "region":      "India",
-            "salary":      "N/A",
-            "salary_num":  0,
-            "source":      "Jooble",
-            "final_url":   "https://www.worley.com/careers",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Senior Piping Design Engineer",
-            "company":     "Engineers India Ltd",
-            "location":    "New Delhi, India",
-            "region":      "India",
-            "salary":      "2800000 – 3500000",
-            "salary_num":  2800000,
-            "source":      "Adzuna",
-            "final_url":   "https://www.engineersindia.com/career",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Lead Piping Engineer – LNG",
-            "company":     "TechnipFMC",
-            "location":    "Singapore",
-            "region":      "Singapore",
-            "salary":      "9000 – 12000 SGD",
-            "salary_num":  9000,
-            "source":      "Jooble",
-            "final_url":   "https://www.technipfmc.com/en/careers/",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Senior Piping Engineer – FPSO",
-            "company":     "McDermott International",
-            "location":    "Kuala Lumpur, Malaysia",
-            "region":      "Malaysia",
-            "salary":      "N/A",
-            "salary_num":  0,
-            "source":      "Jooble",
-            "final_url":   "https://www.mcdermott.com/Careers",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Principal Piping Engineer",
-            "company":     "Sapura Energy",
-            "location":    "Kuala Lumpur, Malaysia",
-            "region":      "Malaysia",
-            "salary":      "15000 – 20000 MYR",
-            "salary_num":  15000,
-            "source":      "Adzuna",
-            "final_url":   "https://www.sapuraenergy.com/careers",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Senior Piping Engineer – Offshore",
-            "company":     "Saudi Aramco",
-            "location":    "Dhahran, Saudi Arabia",
-            "region":      "Gulf",
-            "salary":      "N/A",
-            "salary_num":  0,
-            "source":      "Jooble",
-            "final_url":   "https://www.aramco.com/en/careers",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Lead Piping Engineer – Refinery",
-            "company":     "ADNOC",
-            "location":    "Abu Dhabi, UAE",
-            "region":      "Gulf",
-            "salary":      "35000 – 45000 AED",
-            "salary_num":  35000,
-            "source":      "Jooble",
-            "final_url":   "https://careers.adnoc.ae/",
-            "scraped_at":  "2026-03-03",
-        },
-        {
-            "title":       "Principal Process & Piping Engineer",
-            "company":     "QatarEnergy",
-            "location":    "Doha, Qatar",
-            "region":      "Gulf",
-            "salary":      "N/A",
-            "salary_num":  0,
-            "source":      "Jooble",
-            "final_url":   "https://careers.qatarenergy.qa/",
-            "scraped_at":  "2026-03-03",
-        },
-    ])
+st.markdown('''
+<div class="breadcrumb">
+    🏠 Home &nbsp;›&nbsp; <strong>Job Search</strong>
+    &nbsp;|&nbsp; <em>Enter a keyword below and click Search to refresh results</em>
+</div>
+''', unsafe_allow_html=True)
 
+col_search, col_btn = st.columns([5, 1])
+with col_search:
+    keyword_input = st.text_input(
+        "🔍 Search for a role (e.g. Piping Engineer, Pipe Stress Analysis, FEED Manager)",
+        value=st.session_state["keyword"],
+        placeholder="Type any job title or skill…",
+        label_visibility="visible",
+        key="keyword_input_box",
+    )
+with col_btn:
+    st.markdown("<br>", unsafe_allow_html=True)
+    search_clicked = st.button("🔎 Search", use_container_width=True)
+
+st.markdown("---")
 
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 REGION_FLAGS = {
-    "UK":        "🇬🇧",
-    "India":     "🇮🇳",
-    "Singapore": "🇸🇬",
-    "Malaysia":  "🇲🇾",
-    "Gulf":      "🌍",
+    "UK": "🇬🇧", "India": "🇮🇳", "Singapore": "🇸🇬",
+    "Malaysia": "🇲🇾", "Gulf": "🌍", "UAE": "🌍",
+    "Saudi Arabia": "🌍", "Qatar": "🌍",
 }
 
+SENIORITY_FILTER = re.compile(
+    r"\b(lead|principal|hod|chief|senior|head\s*of\s*dept|20\+\s*years?)\b",
+    re.IGNORECASE,
+)
+
+import re
+
 def render_job_card(row: pd.Series) -> None:
-    """Render a single accessible, senior-friendly job card."""
     flag       = REGION_FLAGS.get(row["region"], "🌐")
     salary_str = str(row.get("salary", "N/A")).strip()
     has_salary = salary_str not in ("N/A", "", "0", "nan")
@@ -336,7 +231,8 @@ def render_job_card(row: pd.Series) -> None:
         if has_salary else
         '<span class="salary-na">Salary not disclosed</span>'
     )
-    final_url = str(row.get("final_url", "#")).strip()
+    final_url  = str(row.get("final_url", row.get("url", "#"))).strip()
+    source_lbl = str(row.get("source", "Company Site"))
 
     st.markdown(f"""
     <div class="job-card">
@@ -347,7 +243,8 @@ def render_job_card(row: pd.Series) -> None:
         <div class="job-meta">
             <strong>🏢 Company:</strong> {row['company']}&nbsp;&nbsp;|&nbsp;&nbsp;
             <strong>📍 Location:</strong> {row['location']}&nbsp;&nbsp;|&nbsp;&nbsp;
-            <strong>🔎 Source:</strong> {row['source']}
+            <strong>🔎 Source:</strong> {source_lbl}&nbsp;&nbsp;|&nbsp;&nbsp;
+            <strong>📅 Listed:</strong> {row.get('scraped_at', 'N/A')}
         </div>
         {salary_html}
         <br/>
@@ -356,47 +253,72 @@ def render_job_card(row: pd.Series) -> None:
            target="_blank"
            rel="noopener noreferrer"
            aria-label="Apply for {row['title']} at {row['company']} — opens in new tab">
-            🔗 Apply on {row['source']} Website
+            🔗 Apply Directly on Company Site
         </a>
     </div>
     """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
-# SIDEBAR
+# DATA LOADING — triggered on first run or new keyword
+# ─────────────────────────────────────────────
+keyword_to_run = keyword_input.strip() or "Piping Engineer"
+needs_refresh  = (
+    search_clicked
+    or st.session_state["jobs_df"].empty
+    or st.session_state["last_keyword"] != keyword_to_run
+)
+
+if needs_refresh:
+    st.session_state["keyword"]      = keyword_to_run
+    st.session_state["last_keyword"] = keyword_to_run
+
+    with st.spinner(f"🔄 Fetching senior **{keyword_to_run}** roles across all regions…"):
+        try:
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            raw_df = asyncio.run(fetch_jobs(keyword_to_run))
+        except Exception as e:
+            st.error(f"⚠️ Error fetching jobs: {e}")
+            raw_df = pd.DataFrame()
+
+    if not raw_df.empty:
+        with st.spinner("🔗 Resolving direct employer links…"):
+            raw_df["final_url"] = raw_df["url"].apply(
+                lambda u: get_direct_link(u) if str(u).startswith("http") else u
+            )
+    st.session_state["jobs_df"] = raw_df
+
+df = st.session_state["jobs_df"].copy()
+
+# ─────────────────────────────────────────────
+# SIDEBAR FILTERS
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🔧 Filter Jobs")
     st.markdown("---")
 
     st.markdown("### 🌍 Regions")
-    all_regions = ["UK", "India", "Singapore", "Malaysia", "Gulf"]
+    all_regions = sorted(df["region"].unique().tolist()) if not df.empty else ["India","UK","Gulf","Singapore","Malaysia"]
     selected_regions = []
     for region in all_regions:
         flag = REGION_FLAGS.get(region, "🌐")
-        checked = st.checkbox(f"{flag}  {region}", value=True, key=f"region_{region}")
-        if checked:
+        if st.checkbox(f"{flag}  {region}", value=True, key=f"region_{region}"):
             selected_regions.append(region)
 
     st.markdown("---")
-    st.markdown("### 💰 Minimum Salary")
-    st.caption("ℹ️ Slide to filter. Jobs with undisclosed salary are always shown.")
-    min_salary = st.slider(
-        label="Minimum salary value",
-        min_value=0,
-        max_value=100000,
-        value=0,
-        step=5000,
-        format="%d",
-        label_visibility="collapsed",
-    )
-    st.markdown(f"**Set minimum:** `{min_salary:,}`")
+    st.markdown("### 🏢 Sources")
+    all_sources = sorted(df["source"].unique().tolist()) if not df.empty else []
+    selected_sources = []
+    for src in all_sources:
+        if st.checkbox(src, value=True, key=f"src_{src}"):
+            selected_sources.append(src)
 
     st.markdown("---")
-    st.markdown("### 🔍 Search Title")
+    st.markdown("### 📝 Filter by Title Keyword")
     title_search = st.text_input(
-        "Filter by keyword in title",
-        placeholder="e.g. FPSO, Offshore, LNG",
+        "E.g. FPSO, Offshore, LNG",
+        placeholder="Leave blank to show all",
         label_visibility="visible",
     )
 
@@ -406,99 +328,91 @@ with st.sidebar:
         "Sort listings by",
         options=["Most Recent", "Company A–Z", "Salary (High to Low)"],
         index=0,
-        label_visibility="visible",
     )
 
     st.markdown("---")
-    refresh = st.button("🔄 Refresh Job Listings", use_container_width=True)
-
+    if st.button("🔄 Clear Cache & Refresh", use_container_width=True):
+        st.session_state["jobs_df"]      = pd.DataFrame()
+        st.session_state["last_keyword"] = ""
+        st.rerun()
 
 # ─────────────────────────────────────────────
-# MAIN CONTENT
+# APPLY SENIORITY POST-FILTER
 # ─────────────────────────────────────────────
-st.markdown("# 🔧 Senior Piping Engineer — Job Listings")
-st.markdown(
-    "Showing **Senior**, **Lead**, and **Principal** roles · "
-    "Minimum **20 years experience** · "
-    "Sourced from Adzuna & Jooble"
-)
-st.markdown("---")
-
-# ── Load data ─────────────────────────────────────────────────────────────────
-with st.spinner("Loading job listings..."):
-    df = load_mock_data()
-    if refresh:
-        st.cache_data.clear()
-        df = load_mock_data()
-
-# ── Apply filters ─────────────────────────────────────────────────────────────
-filtered = df.copy()
-
-# Region filter
-if selected_regions:
-    filtered = filtered[filtered["region"].isin(selected_regions)]
-else:
-    st.warning("⚠️ Please select at least one region in the sidebar.")
-    st.stop()
-
-# Salary filter — keep N/A rows (salary_num == 0) always visible
-salary_mask = (filtered["salary_num"] == 0) | (filtered["salary_num"] >= min_salary)
-filtered = filtered[salary_mask]
-
-# Title keyword filter
-if title_search.strip():
-    filtered = filtered[
-        filtered["title"].str.contains(title_search.strip(), case=False, na=False)
+if not df.empty:
+    df = df[
+        df["title"].str.contains(SENIORITY_FILTER, na=False) |
+        df["company"].str.contains(SENIORITY_FILTER, na=False)
     ]
 
-# Sorting
-if sort_option == "Company A–Z":
-    filtered = filtered.sort_values("company")
-elif sort_option == "Salary (High to Low)":
-    filtered = filtered.sort_values("salary_num", ascending=False)
-else:
-    filtered = filtered.sort_values("scraped_at", ascending=False)
+# ─────────────────────────────────────────────
+# APPLY UI FILTERS
+# ─────────────────────────────────────────────
+if not df.empty:
+    if selected_regions:
+        df = df[df["region"].isin(selected_regions)]
+    if selected_sources:
+        df = df[df["source"].isin(selected_sources)]
+    if title_search.strip():
+        df = df[df["title"].str.contains(title_search.strip(), case=False, na=False)]
 
-filtered = filtered.reset_index(drop=True)
+    if sort_option == "Company A–Z":
+        df = df.sort_values("company")
+    elif sort_option == "Salary (High to Low)":
+        df = df.sort_values("salary", ascending=False)
+    else:
+        df = df.sort_values("scraped_at", ascending=False)
 
-# ── Stats bar ─────────────────────────────────────────────────────────────────
-total         = len(filtered)
-with_salary   = (filtered["salary_num"] > 0).sum()
-region_counts = " · ".join(
-    f"{REGION_FLAGS.get(r,'🌐')} {r}: {n}"
-    for r, n in filtered["region"].value_counts().items()
+    df = df.reset_index(drop=True)
+
+# ─────────────────────────────────────────────
+# MAIN HEADER
+# ─────────────────────────────────────────────
+st.markdown(f"# 🔧 Senior **{st.session_state['keyword']}** — Job Listings")
+st.markdown(
+    "Showing **Lead · Senior · Principal · HOD · Chief** roles &nbsp;|&nbsp; "
+    "20+ years seniority filter applied &nbsp;|&nbsp; "
+    "Sources: Adzuna, Jooble, Naukri, iimjobs, TimesJobs, TCE, Technip, L&T, EIL, IOCL"
 )
-st.markdown(f"""
-<div class="stats-bar">
-    📋 <strong>{total} job{'' if total == 1 else 's'} found</strong>
-    &nbsp;|&nbsp;
-    💰 {with_salary} with salary disclosed
-    &nbsp;|&nbsp;
-    {region_counts}
-</div>
-""", unsafe_allow_html=True)
 
-# ── Job cards ─────────────────────────────────────────────────────────────────
-if filtered.empty:
-    st.markdown("""
-    <div class="no-results">
-        <h3>😔 No jobs match your current filters.</h3>
-        <p>Try selecting more regions, lowering the salary slider, or clearing the title search.</p>
+# ─────────────────────────────────────────────
+# STATS BAR
+# ─────────────────────────────────────────────
+if not df.empty:
+    total = len(df)
+    region_counts = " · ".join(
+        f"{REGION_FLAGS.get(r,'🌐')} {r}: {n}"
+        for r, n in df["region"].value_counts().items()
+    )
+    st.markdown(f"""
+    <div class="stats-bar">
+        📋 <strong>{total} job{"" if total == 1 else "s"} found</strong>
+        &nbsp;|&nbsp; {region_counts}
     </div>
     """, unsafe_allow_html=True)
-else:
-    for _, row in filtered.iterrows():
+
+    for _, row in df.iterrows():
         render_job_card(row)
+else:
+    if not st.session_state["jobs_df"].empty:
+        st.markdown("""
+        <div class="no-results">
+            <h3>😔 No senior roles match your current filters.</h3>
+            <p>Try selecting more regions, clearing the title search, or adjusting source filters.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.info("👆 Enter a keyword above and click **Search** to load jobs.")
 
 # ─────────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center; color:#9CA3AF; font-size:0.9rem;'>"
-    "Data sourced from Adzuna, Jooble, Naukri, iimjobs, TCE, Technip Energies & EIL · "
-    "Links resolved via job_link_resolver · "
-    "Listings refreshed daily"
+    "<div style='text-align:center; color:#9CA3AF; font-size:0.95rem;'>"
+    "Sources: Adzuna · Jooble · Naukri.com · iimjobs · TimesJobs · "
+    "TCE · Technip Energies · L&T Hydrocarbon · EIL · IOCL · "
+    "Links resolved via job_link_resolver"
     "</div>",
     unsafe_allow_html=True,
 )
