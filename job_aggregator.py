@@ -14,10 +14,13 @@ from datetime import datetime
 # ─────────────────────────────────────────────
 # CONFIG — replace with your real API keys
 # ─────────────────────────────────────────────
-ADZUNA_APP_ID  = st.secrets.adzuna.app_id
-ADZUNA_APP_KEY = st.secrets.adzuna.app_key
-JOOBLE_API_KEY = st.secrets.jooble.api_key
-
+def _get_secrets():
+    """Load API keys lazily — only when a fetch is actually triggered."""
+    return {
+        "adzuna_id":  st.secrets.get("adzuna", {}).get("app_id", ""),
+        "adzuna_key": st.secrets.get("adzuna", {}).get("app_key", ""),
+        "jooble_key": st.secrets.get("jooble", {}).get("api_key", ""),
+    }
 
 # Region definitions
 ADZUNA_REGIONS = {
@@ -174,6 +177,10 @@ async def fetch_jooble(client: httpx.AsyncClient, country_code: str, region_name
 # ORCHESTRATOR
 # ─────────────────────────────────────────────
 async def main() -> pd.DataFrame:
+    secrets = _get_secrets()                        # ← add this line
+    ADZUNA_APP_ID  = secrets["adzuna_id"]           # ← add this line
+    ADZUNA_APP_KEY = secrets["adzuna_key"]          # ← add this line
+    JOOBLE_API_KEY = secrets["jooble_key"]  
     all_results = []
 
     async with httpx.AsyncClient() as client:
