@@ -9,7 +9,7 @@ import streamlit as st
 import pandas as pd
 import asyncio
 import sys
-
+import re
 from job_aggregator import main as fetch_jobs
 from job_link_resolver import get_direct_link
 
