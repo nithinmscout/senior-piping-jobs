@@ -62,8 +62,8 @@ DOMAIN_KEYWORDS = re.compile(
 # Block titles that clearly belong to unrelated fields
 EXCLUDE_KEYWORDS = re.compile(
     r"\b(hvac|well(bore|head)?|drilling|electrical|civil|structural|"
-    r"instrument(ation)?|telecom|business|ai|software|nurse|analyst|doctor|"
-    r"accountant|sales|library|marketing|supply\s*chain|logistics|"
+    r"instrument(ation)?|telecom|product|business|ai|software|nurse|analyst|doctor|"
+    r"accountant|sales|library|marketing|developer|supply\s*chain|logistics|"
     r"warehouse|driver|security|lecturer|research|talent|data|plumber|plumbing)\b",
     re.IGNORECASE,
 )
