@@ -2,12 +2,6 @@
 job_aggregator_ui.py
 ─────────────────────────────────────────────────────────────────────────────
 Streamlit UI — Senior Engineer Job Aggregator
-New in this version:
-  - ⭐ Priority company badge + boosted to top
-  - Relevance sorting (explicit piping → domain → seniority)
-  - Keyword exclusion multiselect in sidebar
-  - Salary slider updated for INR (crore range)
-  - All existing features preserved
 ─────────────────────────────────────────────────────────────────────────────
 """
 
@@ -104,6 +98,10 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
     padding: 0.8rem 1.2rem; margin-bottom: 1.4rem;
     font-size: 1rem !important; color: #1D4ED8; font-weight: 600;
 }
+.exclude-bar {
+    background-color: #FFF7ED; border: 1px solid #FED7AA; border-radius: 8px;
+    padding: 0.8rem 1.2rem; margin-bottom: 1rem;
+}
 hr { border-color: #E2E8F0 !important; margin: 1rem 0; }
 .stSlider label, .stCheckbox label, .stSelectbox label { font-size: 18px !important; font-weight: 600 !important; }
 input[type="text"],
@@ -122,6 +120,12 @@ REGION_FLAGS = {
     "Saudi Arabia": "🇸🇦", "Qatar": "🇶🇦", "Global": "🌐",
 }
 
+EXCLUDE_PRESETS = [
+    "HVAC", "Electrical", "Civil", "Structural", "Instrumentation",
+    "Graduate", "Trainee", "Junior", "Drilling", "Well", "Telecom",
+    "Software", "IT", "Sales", "Plumbing", "Contract Only",
+]
+
 # ─────────────────────────────────────────────
 # TOP BAR
 # ─────────────────────────────────────────────
@@ -135,6 +139,7 @@ st.markdown(
 )
 st.markdown("---")
 
+# ── Row 1: search box + button ───────────────────────────────────────────────
 col_search, col_btn = st.columns([5, 1])
 with col_search:
     search_query = st.text_input(
@@ -147,6 +152,35 @@ with col_search:
 with col_btn:
     st.markdown("<br/>", unsafe_allow_html=True)
     run_search = st.button("🔄 Search", use_container_width=True)
+
+# ── Row 2: exclude keywords (inline, below search bar) ──────────────────────
+col_excl, col_custom = st.columns([3, 2])
+with col_excl:
+    user_exclusions = st.multiselect(
+        label="🚫 Exclude keywords from results",
+        options=EXCLUDE_PRESETS,
+        default=[],
+        help="Jobs whose title contains any selected word will be hidden instantly.",
+        placeholder="Select words to exclude…",
+    )
+with col_custom:
+    custom_exclude = st.text_input(
+        label="➕ Add custom exclude words (comma-separated)",
+        placeholder="e.g.  offshore, temporary, contract",
+        label_visibility="visible",
+    )
+
+all_exclusions = user_exclusions[:]
+if custom_exclude.strip():
+    all_exclusions += [w.strip() for w in custom_exclude.split(",") if w.strip()]
+
+if all_exclusions:
+    st.markdown(
+        f'<div class="exclude-bar">🚫 <strong>Active exclusions:</strong> '
+        + " · ".join(f"<code>{w}</code>" for w in all_exclusions)
+        + '</div>',
+        unsafe_allow_html=True,
+    )
 
 st.markdown("---")
 
@@ -173,9 +207,7 @@ if trigger_fetch and search_query.strip():
                 df_raw["salary"]
                 .str.extract(r"(\d[\d,]*)", expand=False)
                 .str.replace(",", "", regex=False)
-                .fillna(0)
-                .astype(float)
-                .astype(int)
+                .fillna(0).astype(float).astype(int)
             )
             if "rank"     not in df_raw.columns: df_raw["rank"]     = 2
             if "priority" not in df_raw.columns: df_raw["priority"] = False
@@ -188,7 +220,7 @@ if trigger_fetch and search_query.strip():
 df = st.session_state["job_df"]
 
 # ─────────────────────────────────────────────
-# SIDEBAR FILTERS
+# SIDEBAR FILTERS  (regions, sources, priority, salary, sort)
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🔧 Filter Jobs")
@@ -215,30 +247,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### ⭐ Priority Companies Only")
     priority_only = st.checkbox("Show only priority EPC / OG companies", value=False)
-
-    st.markdown("---")
-    st.markdown("### 🚫 Exclude Keywords")
-    st.caption("Type words to hide from results (e.g. HVAC, Graduate, Contract)")
-    # Preset suggestions plus free-type
-    EXCLUDE_PRESETS = [
-        "HVAC", "Electrical", "Civil", "Structural", "Instrumentation",
-        "Graduate", "Trainee", "Junior", "Drilling", "Well", "Telecom",
-        "Software", "IT", "Sales", "Plumbing", "Contract Only"
-    ]
-    user_exclusions = st.multiselect(
-        "Select or type keywords to exclude",
-        options=EXCLUDE_PRESETS,
-        default=[],
-        help="Jobs whose title contains any of these words will be hidden.",
-    )
-    custom_exclude = st.text_input(
-        "Add custom exclude word",
-        placeholder="e.g.  offshore,  temporary",
-        label_visibility="visible",
-    )
-    all_exclusions = user_exclusions[:]
-    if custom_exclude.strip():
-        all_exclusions += [w.strip() for w in custom_exclude.split(",") if w.strip()]
 
     st.markdown("---")
     st.markdown("### 💰 Minimum Salary (₹)")
@@ -284,19 +292,15 @@ if selected_sources:
 if priority_only:
     filtered = filtered[filtered["priority"] == True]
 
-# Keyword exclusion filter
 if all_exclusions:
-    pattern = "|".join(re.escape(w) for w in all_exclusions)
+    pattern   = "|".join(re.escape(w) for w in all_exclusions)
     excl_mask = filtered["title"].str.contains(pattern, case=False, na=False)
-    filtered = filtered[~excl_mask]
+    filtered  = filtered[~excl_mask]
 
 salary_mask = (filtered["salary_num"] == 0) | (filtered["salary_num"] >= min_salary)
 filtered = filtered[salary_mask]
 
-# Sorting
 if sort_option == "Relevance (Piping First)":
-    # primary: priority company (True=1, False=0 → invert so True sorts first)
-    # secondary: rank (0=piping explicit, 1=domain, 2=other)
     filtered = filtered.assign(priority_sort=~filtered["priority"]).sort_values(
         ["priority_sort", "rank"], ascending=[True, True]
     ).drop(columns=["priority_sort"])
@@ -314,7 +318,7 @@ filtered = filtered.reset_index(drop=True)
 # ─────────────────────────────────────────────
 total       = len(filtered)
 with_salary = (filtered["salary_num"] > 0).sum()
-priority_ct = filtered["priority"].sum() if "priority" in filtered.columns else 0
+priority_ct = int(filtered["priority"].sum()) if "priority" in filtered.columns else 0
 region_counts = " · ".join(
     f"{REGION_FLAGS.get(r, '🌐')} {r}: {n}"
     for r, n in filtered["region"].value_counts().items()
