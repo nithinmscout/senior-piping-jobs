@@ -198,7 +198,7 @@ with col_excl:
     )
 with col_custom:
     custom_exclude = st.text_input(
-        label="➕ Add custom exclude words (comma-separated)",
+        label="➕ Add custom exclude words (Use commas to separate)",
         placeholder="e.g.  offshore, temporary, contract",
         label_visibility="visible",
     )
