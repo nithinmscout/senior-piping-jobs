@@ -111,6 +111,39 @@ div[data-testid="stTextInput"] input {
     border-radius: 6px !important; padding: 8px 12px !important;
 }
 input[type="text"]::placeholder { color: #9CA3AF !important; opacity: 1 !important; }
+
+/* ── Exclude multiselect — visible tags & input ───────── */
+div[data-testid="stMultiSelect"] span[data-baseweb="tag"] {
+    background-color: #C2410C !important;
+    color: #FFFFFF !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    border-radius: 20px !important;
+    padding: 4px 12px !important;
+}
+div[data-testid="stMultiSelect"] input {
+    color: #1A1A2E !important;
+    background-color: #FFFFFF !important;
+    font-size: 17px !important;
+    border: 2px solid #C2410C !important;
+    border-radius: 6px !important;
+}
+div[data-testid="stMultiSelect"] > div {
+    background-color: #FFF7ED !important;
+    border: 2px solid #C2410C !important;
+    border-radius: 8px !important;
+}
+div[data-testid="stMultiSelect"] label {
+    color: #C2410C !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+}
+div[data-testid="stTextInput"]:has(input[placeholder*="offshore"]) input {
+    border: 2px solid #C2410C !important;
+    background-color: #FFF7ED !important;
+    color: #1A1A2E !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
