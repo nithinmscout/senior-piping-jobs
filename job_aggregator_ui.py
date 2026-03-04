@@ -102,6 +102,11 @@ h3 { font-size: 1.3rem !important; font-weight: 600; color: #1A1A2E !important; 
     background-color: #FFF7ED; border: 1px solid #FED7AA; border-radius: 8px;
     padding: 0.8rem 1.2rem; margin-bottom: 1rem;
 }
+.controls-bar {
+    background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;
+    padding: 0.9rem 1.2rem; margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+}
 hr { border-color: #E2E8F0 !important; margin: 1rem 0; }
 .stSlider label, .stCheckbox label, .stSelectbox label { font-size: 18px !important; font-weight: 600 !important; }
 input[type="text"],
@@ -143,7 +148,6 @@ div[data-testid="stTextInput"]:has(input[placeholder*="offshore"]) input {
     background-color: #FFF7ED !important;
     color: #1A1A2E !important;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -160,7 +164,7 @@ EXCLUDE_PRESETS = [
 ]
 
 # ─────────────────────────────────────────────
-# TOP BAR
+# HEADER
 # ─────────────────────────────────────────────
 st.markdown("# 🔧 Senior Engineer — Job Aggregator")
 st.markdown(
@@ -186,7 +190,7 @@ with col_btn:
     st.markdown("<br/>", unsafe_allow_html=True)
     run_search = st.button("🔄 Search", use_container_width=True)
 
-# ── Row 2: exclude keywords (inline, below search bar) ──────────────────────
+# ── Row 2: exclude keywords ──────────────────────────────────────────────────
 col_excl, col_custom = st.columns([3, 2])
 with col_excl:
     user_exclusions = st.multiselect(
@@ -209,11 +213,23 @@ if custom_exclude.strip():
 
 if all_exclusions:
     st.markdown(
-        f'<div class="exclude-bar">🚫 <strong>Active exclusions:</strong> '
+        '<div class="exclude-bar">🚫 <strong>Active exclusions:</strong> '
         + " · ".join(f"<code>{w}</code>" for w in all_exclusions)
         + '</div>',
         unsafe_allow_html=True,
     )
+
+# ── Row 3: sort + priority toggle ────────────────────────────────────────────
+col_sort, col_priority, col_spacer = st.columns([2, 2, 2])
+with col_sort:
+    sort_option = st.selectbox(
+        "📅 Sort By",
+        options=["Relevance (Piping First)", "Most Recent", "Company A–Z", "Salary (High to Low)"],
+        index=0,
+    )
+with col_priority:
+    st.markdown("<br/>", unsafe_allow_html=True)
+    priority_only = st.checkbox("⭐ Show only priority EPC / OG companies", value=False)
 
 st.markdown("---")
 
@@ -253,35 +269,12 @@ if trigger_fetch and search_query.strip():
 df = st.session_state["job_df"]
 
 # ─────────────────────────────────────────────
-# SIDEBAR FILTERS  (regions, sources, priority, salary, sort)
+# SIDEBAR — salary only
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🔧 Filter Jobs")
     st.markdown("---")
 
-    st.markdown("### 🌍 Regions")
-    all_regions = sorted(df["region"].unique().tolist()) if not df.empty else [
-        "UK", "India", "Singapore", "Malaysia", "UAE", "Saudi Arabia", "Qatar", "Global"
-    ]
-    selected_regions = []
-    for region in all_regions:
-        flag = REGION_FLAGS.get(region, "🌐")
-        if st.checkbox(f"{flag}  {region}", value=True, key=f"region_{region}"):
-            selected_regions.append(region)
-
-    st.markdown("---")
-    st.markdown("### 🏢 Sources")
-    all_sources = sorted(df["source"].unique().tolist()) if not df.empty else []
-    selected_sources = []
-    for src in all_sources:
-        if st.checkbox(src, value=True, key=f"src_{src}"):
-            selected_sources.append(src)
-
-    st.markdown("---")
-    st.markdown("### ⭐ Priority Companies Only")
-    priority_only = st.checkbox("Show only priority EPC / OG companies", value=False)
-
-    st.markdown("---")
     st.markdown("### 💰 Minimum Salary (₹)")
     st.caption("ℹ️ Jobs with undisclosed salary are always shown.")
     min_salary = st.slider(
@@ -295,14 +288,6 @@ with st.sidebar:
     else:
         sal_label = f"₹{min_salary:,}"
     st.markdown(f"**Set minimum:** `{sal_label}`")
-
-    st.markdown("---")
-    st.markdown("### 📅 Sort By")
-    sort_option = st.selectbox(
-        "Sort listings by",
-        options=["Relevance (Piping First)", "Most Recent", "Company A–Z", "Salary (High to Low)"],
-        index=0,
-    )
 
 # ─────────────────────────────────────────────
 # APPLY FILTERS
@@ -318,10 +303,6 @@ if df.empty:
 
 filtered = df.copy()
 
-if selected_regions:
-    filtered = filtered[filtered["region"].isin(selected_regions)]
-if selected_sources:
-    filtered = filtered[filtered["source"].isin(selected_sources)]
 if priority_only:
     filtered = filtered[filtered["priority"] == True]
 
@@ -409,7 +390,7 @@ if filtered.empty:
     st.markdown("""
     <div class="no-results">
         <h3>😔 No jobs match your current filters.</h3>
-        <p>Try adjusting regions, sources, or clearing the exclusion keywords.</p>
+        <p>Try adjusting the salary slider or clearing exclusion keywords.</p>
     </div>
     """, unsafe_allow_html=True)
 else:
