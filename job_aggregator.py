@@ -1,13 +1,12 @@
 """
-job_aggregator.py  — FIXED VERSION
+job_aggregator.py
 ─────────────────────────────────────────────────────────────────────────────
-Fixes applied (from error log analysis):
-  1. TimesJobs SSL error       → use http:// instead of https://
-  2. TCE careers SSL mismatch  → corrected URL to tce.co.in/careers
-  3. Technip Energies 404      → fixed URL (was wrongly resolving to ten.com)
-  4. L&T Hydrocarbon DNS fail  → replaced with working lthydrocarbon.com URL
-  5. EIL 404                   → corrected careers page URL
-  6. Query bug                 → was concatenating "Senior Piping Engineer" + user input
+Senior Engineer Job Aggregator — Full Version
+New in this version:
+  - PRIORITY_COMPANIES set (boost + star badge for known EPC/OG companies)
+  - PRIORITY_JOB_SITES curated link cards (Rigzone, NaukriGulf, Airswift etc.)
+  - relevance_rank() for piping-first sorting
+  - All existing features preserved
 ─────────────────────────────────────────────────────────────────────────────
 """
 
@@ -19,7 +18,7 @@ import streamlit as st
 from datetime import datetime, UTC
 
 # ─────────────────────────────────────────────
-# REGION DEFINITIONS  (unchanged)
+# REGION DEFINITIONS
 # ─────────────────────────────────────────────
 ADZUNA_REGIONS = {
     "UK":        "gb",
@@ -40,6 +39,38 @@ JOOBLE_REGIONS = {
 RESULTS_PER_PAGE = 50
 
 # ─────────────────────────────────────────────
+# PRIORITY COMPANIES  — EPC / Oil & Gas / OEM
+# Jobs from these companies get a ⭐ badge and are boosted to the top
+# ─────────────────────────────────────────────
+PRIORITY_COMPANIES = {
+    # EPC / Engineering Consultancies
+    "larsen & toubro", "l&t", "tata projects", "tata consulting engineers", "tce",
+    "engineers india limited", "eil", "worley", "technip energies", "technipfmc",
+    "wood plc", "wood group", "kbr", "mcdermott", "saipem", "bechtel",
+    "samsung engineering", "aker solutions", "tecnimont", "uhde india", "thyssenkrupp",
+    "afcons", "hindustan construction", "hcc", "gmr infrastructure", "ircon",
+    "meil", "megha engineering", "kalpataru", "kptl", "kec international",
+    "purna design", "global hi-tech", "quest global", "air liquide",
+    "bansal infratech", "buildcraft", "enventure", "sunshine workforce",
+    "aarvi encon", "lamprell", "va tech wabag", "valmet", "mott macdonald",
+    "jacobs", "penspen", "stantec", "atkinsrealis", "atkins", "babcock",
+    "national gas", "exxonmobil", "mn dastur", "m.n. dastur", "proton engineering",
+    "chempro", "esteem projects", "yokogawa", "petronet lng", "gail", "ongc",
+    "reliance", "adani", "mie industrial", "oceanmight", "avanceon",
+    "framatome", "aecom", "wsp", "costain", "bae systems",
+    # Staffing / Recruitment specialists in oil & gas
+    "airswift", "nes fircroft", "orion group", "trs staffing", "transcend hr",
+    "perito", "jackson hogg", "scantec", "wolviston", "highfield professional",
+    "carmichael", "ata recruitment", "adepto", "emco talent",
+    "rise technical", "henderson brown", "ernest gordon", "alecto",
+    "sterling choice", "apex resourcing", "chrysalis talent", "cv technical",
+    "plan recruit", "silicon valley associates",
+    # O&G operators
+    "saudi aramco", "adnoc", "qatarenergy", "shell", "bp", "totalenergies",
+    "chevron", "conocophillips", "halliburton", "schlumberger", "slb",
+}
+
+# ─────────────────────────────────────────────
 # SENIORITY FILTER
 # ─────────────────────────────────────────────
 TITLE_KEYWORDS = re.compile(
@@ -47,7 +78,6 @@ TITLE_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
-# Job must contain at least one piping/oil-and-gas specific domain word
 DOMAIN_KEYWORDS = re.compile(
     r"\b(pip(ing|e|es?)|pipe\s*stress|stress\s*analys|"
     r"piping\s*(design|engineer|layout|checker|drafter|lead|head)|"
@@ -59,24 +89,29 @@ DOMAIN_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
-# Block titles that clearly belong to unrelated fields
+# Explicitly piping — these jobs go to the very top (rank 0)
+PIPING_EXPLICIT = re.compile(
+    r"\b(pip(ing|e|es?)|pipe\s*stress|stress\s*analys|caesar|pdms|sp3d|isometric)\b",
+    re.IGNORECASE,
+)
+
 EXCLUDE_KEYWORDS = re.compile(
     r"\b(hvac|well(bore|head)?|drilling|electrical|civil|structural|"
-    r"instrument(ation)?|telecom|product|business|ai|software|nurse|analyst|doctor|"
-    r"accountant|sales|library|marketing|developer|supply\s*chain|logistics|"
-    r"warehouse|driver|security|lecturer|research|talent|data|plumber|plumbing)\b",
+    r"instrument(ation)?|telecom|software|nurse|doctor|"
+    r"accountant|sales|marketing|supply\s*chain|logistics|"
+    r"warehouse|driver|security|plumber|plumbing)\b",
     re.IGNORECASE,
 )
 
 EXP_PATTERN    = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*years?", re.IGNORECASE)
 MIN_EXPERIENCE = 8
 
+
 def title_passes_filter(title: str, query: str = "") -> bool:
     if EXCLUDE_KEYWORDS.search(title):
         return False
     if not TITLE_KEYWORDS.search(title):
         return False
-    # If the user's own query contains a domain word, trust it — don't double-filter
     if query and DOMAIN_KEYWORDS.search(query):
         return True
     return bool(DOMAIN_KEYWORDS.search(title))
@@ -90,44 +125,50 @@ def experience_passes_filter(description: str) -> bool:
         return True
     return max(int(m) for m in matches) >= MIN_EXPERIENCE
 
+
+def relevance_rank(title: str) -> int:
+    """
+    0 = explicitly piping/stress (shown first)
+    1 = domain-related but not explicitly piping
+    2 = seniority match only
+    """
+    if PIPING_EXPLICIT.search(title):
+        return 0
+    if DOMAIN_KEYWORDS.search(title):
+        return 1
+    return 2
+
+
+def is_priority_company(company: str) -> bool:
+    return company.lower().strip() in PRIORITY_COMPANIES or any(
+        p in company.lower() for p in PRIORITY_COMPANIES
+    )
+
+
 # ─────────────────────────────────────────────
-# SALARY CONVERTER  — approximate rates to INR
+# SALARY CONVERTER
 # ─────────────────────────────────────────────
 APPROX_TO_INR = {
-    "GBP": 120,    # 1 GBP  ≈ ₹120
-    "USD": 92,     # 1 USD  ≈ ₹92
-    "SGD": 72,     # 1 SGD  ≈ ₹62
-    "MYR": 23,     # 1 MYR  ≈ ₹18
-    "AED": 25,     # 1 AED  ≈ ₹23
-    "SAR": 24,     # 1 SAR  ≈ ₹22
-    "QAR": 25,     # 1 QAR  ≈ ₹23
-    "INR": 1,      # already rupees
+    "GBP": 120, "USD": 92, "SGD": 72,
+    "MYR": 23,  "AED": 25, "SAR": 24,
+    "QAR": 25,  "INR": 1,
 }
 
 def to_inr(value: float, region: str) -> int:
-    """Convert a salary number to INR based on region."""
     currency_map = {
-        "UK":           "GBP",
-        "India":        "INR",
-        "Singapore":    "SGD",
-        "Malaysia":     "MYR",
-        "UAE":          "AED",
-        "Saudi Arabia": "SAR",
-        "Qatar":        "QAR",
-        "Gulf":         "AED",
+        "UK": "GBP", "India": "INR", "Singapore": "SGD",
+        "Malaysia": "MYR", "UAE": "AED", "Saudi Arabia": "SAR",
+        "Qatar": "QAR", "Gulf": "AED",
     }
-    currency = currency_map.get(region, "USD")
-    rate     = APPROX_TO_INR.get(currency, 83)
+    rate = APPROX_TO_INR.get(currency_map.get(region, "USD"), 92)
     return int(value * rate)
 
 def format_inr(amount: int) -> str:
-    """Format a number as Indian rupees with ₹ symbol and lakh/crore notation."""
     if amount >= 10_000_000:
-        return f"₹{amount/10_000_000:.1f} Cr/yr"
+        return f"\u20b9{amount/10_000_000:.1f} Cr/yr"
     elif amount >= 100_000:
-        return f"₹{amount/100_000:.1f} L/yr"
-    else:
-        return f"₹{amount:,}/yr"
+        return f"\u20b9{amount/100_000:.1f} L/yr"
+    return f"\u20b9{amount:,}/yr"
 
 def safe_salary(job: dict, source: str, region: str = "UK") -> str:
     try:
@@ -135,23 +176,20 @@ def safe_salary(job: dict, source: str, region: str = "UK") -> str:
             min_s = job.get("salary_min")
             max_s = job.get("salary_max")
             if min_s or max_s:
-                min_inr = format_inr(to_inr(float(min_s or 0), region))
-                max_inr = format_inr(to_inr(float(max_s or 0), region))
-                return f"{min_inr} – {max_inr}"
+                return f"{format_inr(to_inr(float(min_s or 0), region))} – {format_inr(to_inr(float(max_s or 0), region))}"
         elif source == "jooble":
             salary = str(job.get("salary", "")).strip()
             if salary and salary not in ("", "0"):
-                # extract first number from jooble salary string e.g. "85,000 USD"
                 nums = re.findall(r"[\d,]+", salary)
                 if nums:
-                    val = float(nums[0].replace(",", ""))
-                    return format_inr(to_inr(val, region))
+                    return format_inr(to_inr(float(nums[0].replace(",", "")), region))
     except Exception:
         pass
     return "N/A"
 
+
 # ─────────────────────────────────────────────
-# FETCHERS  (unchanged)
+# FETCHERS
 # ─────────────────────────────────────────────
 async def fetch_adzuna(client, country_code, region_name, app_id, app_key, query):
     url = (
@@ -164,23 +202,25 @@ async def fetch_adzuna(client, country_code, region_name, app_id, app_key, query
     try:
         resp = await client.get(url, timeout=15)
         resp.raise_for_status()
-        jobs = resp.json().get("results", [])
         records = []
-        for job in jobs:
+        for job in resp.json().get("results", []):
             title = job.get("title", "")
             if not title_passes_filter(title, query):
                 continue
             if not experience_passes_filter(job.get("description", "")):
                 continue
+            company = job.get("company", {}).get("display_name", "N/A")
             records.append({
                 "source":     "Adzuna",
                 "region":     region_name,
                 "title":      title,
-                "company":    job.get("company", {}).get("display_name", "N/A"),
+                "company":    company,
                 "location":   job.get("location", {}).get("display_name", "N/A"),
-                "salary": safe_salary(job, "adzuna", region_name),
+                "salary":     safe_salary(job, "adzuna", region_name),
                 "url":        job.get("redirect_url", "N/A"),
                 "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "priority":   is_priority_company(company),
+                "rank":       relevance_rank(title),
             })
         print(f"  [Adzuna] {region_name}: {len(records)} qualifying jobs found.")
         return records
@@ -191,32 +231,29 @@ async def fetch_adzuna(client, country_code, region_name, app_id, app_key, query
 
 async def fetch_jooble(client, country_code, region_name, api_key, query):
     url = f"https://jooble.org/api/{api_key}"
-    payload = {
-        "keywords":     query,
-        "location":     country_code,
-        "page":         "1",
-        "resultonpage": str(RESULTS_PER_PAGE),
-    }
+    payload = {"keywords": query, "location": country_code, "page": "1", "resultonpage": str(RESULTS_PER_PAGE)}
     try:
         resp = await client.post(url, json=payload, timeout=15)
         resp.raise_for_status()
-        jobs = resp.json().get("jobs", [])
         records = []
-        for job in jobs:
+        for job in resp.json().get("jobs", []):
             title = job.get("title", "")
             if not title_passes_filter(title, query):
                 continue
             if not experience_passes_filter(job.get("snippet", "")):
                 continue
+            company = job.get("company", "N/A")
             records.append({
                 "source":     "Jooble",
                 "region":     region_name,
                 "title":      title,
-                "company":    job.get("company", "N/A"),
+                "company":    company,
                 "location":   job.get("location", "N/A"),
-                "salary": safe_salary(job, "jooble", region_name),
+                "salary":     safe_salary(job, "jooble", region_name),
                 "url":        job.get("link", "N/A"),
                 "scraped_at": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "priority":   is_priority_company(company),
+                "rank":       relevance_rank(title),
             })
         print(f"  [Jooble]  {region_name}: {len(records)} qualifying jobs found.")
         return records
@@ -224,9 +261,9 @@ async def fetch_jooble(client, country_code, region_name, api_key, query):
         print(f"  [Jooble]  {region_name} ERROR: {e}")
         return []
 
+
 # ─────────────────────────────────────────────
-# INDEED SCRAPER  (no API key needed)
-# Regions: UK, India, Singapore, Malaysia, UAE
+# INDEED SCRAPER
 # ─────────────────────────────────────────────
 INDEED_REGIONS = {
     "UK":        ("https://www.indeed.co.uk", "United+Kingdom"),
@@ -244,11 +281,7 @@ def fetch_indeed(query: str = "Senior Piping Engineer") -> list[dict]:
     today  = datetime.now(UTC).strftime("%Y-%m-%d")
     q_plus = query.replace(" ", "+")
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
     }
     records = []
@@ -260,195 +293,217 @@ def fetch_indeed(query: str = "Senior Piping Engineer") -> list[dict]:
             if resp.status_code != 200:
                 print(f"  [Indeed]  {region_name}: HTTP {resp.status_code} — skipping.")
                 continue
-
             soup  = BeautifulSoup(resp.text, "lxml")
-            cards = soup.select("div.job_seen_beacon, li.css-5lfssm")
-            if not cards:
-                cards = soup.select("div[data-jk]")
-
+            cards = soup.select("div.job_seen_beacon, li.css-5lfssm") or soup.select("div[data-jk]")
             count = 0
             for card in cards:
                 title_el = card.select_one("h2.jobTitle span, h2 a span")
                 title    = title_el.get_text(strip=True) if title_el else ""
                 if not title or not title_passes_filter(title, query):
                     continue
-
-                company_el    = card.select_one("span.companyName, [data-testid='company-name']")
+                company_el    = card.select_one("span.companyName, [data-testid=\'company-name\']")
                 company       = company_el.get_text(strip=True) if company_el else "N/A"
-
-                loc_el        = card.select_one("div.companyLocation, [data-testid='text-location']")
+                loc_el        = card.select_one("div.companyLocation, [data-testid=\'text-location\']")
                 location_text = loc_el.get_text(strip=True) if loc_el else region_name
-
                 link_el  = card.select_one("h2.jobTitle a, h2 a")
                 job_path = link_el["href"] if link_el and link_el.get("href") else ""
-                job_url  = (
-                    f"{base_url}{job_path}" if job_path.startswith("/")
-                    else job_path if job_path.startswith("http")
-                    else base_url
-                )
-
+                job_url  = (f"{base_url}{job_path}" if job_path.startswith("/") else job_path if job_path.startswith("http") else base_url)
                 sal_el = card.select_one("div.salary-snippet-container")
                 salary = sal_el.get_text(strip=True) if sal_el else "N/A"
-
                 records.append({
-                    "source":     "Indeed",
-                    "region":     region_name,
-                    "title":      title,
-                    "company":    company,
-                    "location":   location_text,
-                    "salary":     salary,
-                    "url":        job_url,
-                    "scraped_at": today,
+                    "source": "Indeed", "region": region_name, "title": title,
+                    "company": company, "location": location_text, "salary": salary,
+                    "url": job_url, "scraped_at": today,
+                    "priority": is_priority_company(company), "rank": relevance_rank(title),
                 })
                 count += 1
-
             print(f"  [Indeed]  {region_name}: {count} qualifying jobs found.")
             _time.sleep(1.5)
-
         except Exception as e:
             print(f"  [Indeed]  {region_name} ERROR: {e}")
-
     return records
 
+
 # ─────────────────────────────────────────────
-# INDIAN SOURCES  — ALL URLS FIXED
+# INDIAN SOURCES + PRIORITY JOB SITES
 # ─────────────────────────────────────────────
 def fetch_indian_sources(query: str = "Piping Engineer") -> list[dict]:
-    """
-    URL fixes vs previous version:
-      - TimesJobs:        https → http  (their SSL cert is broken)
-      - TCE:              careers.tce.co.in → tce.co.in/careers (hostname mismatch fixed)
-      - Technip Energies: was resolving to ten.com (wrong); now correct technipenergies.com path
-      - L&T Hydrocarbon:  lthydrocarbon.com is down; replaced with lntecc.com/careers
-      - EIL:              /career/applying-to-eil → /career (correct working path)
-    """
     today  = datetime.now(UTC).strftime("%Y-%m-%d")
     q_plus = query.replace(" ", "+")
     q_dash = query.replace(" ", "-").lower()
     records = []
 
-    # ── 1. Naukri.com ────────────────────────────────────────────────────────
-    # ✅ Working fine — no change needed
-    records.append({
-        "source":     "Naukri.com",
-        "region":     "India",
-        "title":      f"Lead / Principal {query} (20+ Years)",
-        "company":    "Multiple Employers",
-        "location":   "India",
-        "salary":     "N/A",
-        "url":        f"https://www.naukri.com/{q_dash}-jobs?experience=20",
-        "scraped_at": today,
-    })
+    # ── Core Indian job portals ──────────────────────────────────────────────
+    records.append({"source": "Naukri.com", "region": "India",
+        "title": f"Lead / Principal {query} (20+ Years)", "company": "Multiple Employers",
+        "location": "India", "salary": "N/A",
+        "url": f"https://www.naukri.com/{q_dash}-jobs?experience=20",
+        "scraped_at": today, "priority": False, "rank": 0})
 
-    # ── 2. iimjobs.com ───────────────────────────────────────────────────────
-    # ✅ Working fine — no change needed
-    records.append({
-        "source":     "iimjobs.com",
-        "region":     "India",
-        "title":      f"Senior / Lead {query} – Engineering Services (15–25 yrs)",
-        "company":    "Multiple Employers",
-        "location":   "India",
-        "salary":     "N/A",
-        "url":        f"https://www.iimjobs.com/search/?searchstring={q_plus}&expMin=15&expMax=25",
-        "scraped_at": today,
-    })
+    records.append({"source": "iimjobs.com", "region": "India",
+        "title": f"Senior / Lead {query} – Engineering Services (15–25 yrs)", "company": "Multiple Employers",
+        "location": "India", "salary": "N/A",
+        "url": f"https://www.iimjobs.com/search/?searchstring={q_plus}&expMin=15&expMax=25",
+        "scraped_at": today, "priority": False, "rank": 0})
 
-    # ── 3. TimesJobs  — FIX: use http:// (their HTTPS cert is broken) ────────
+    records.append({"source": "Foundit", "region": "India",
+        "title": f"Senior / Lead {query} (15+ yrs)", "company": "Multiple Employers",
+        "location": "India", "salary": "N/A",
+        "url": f"https://www.foundit.in/srp/results?searchId=&query={q_plus}&experienceRanges=15-20",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "Shine.com", "region": "India",
+        "title": f"Lead / Principal {query}", "company": "Multiple Employers",
+        "location": "India", "salary": "N/A",
+        "url": f"https://www.shine.com/job-search/{q_dash}-jobs",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "Apna", "region": "India",
+        "title": f"Senior {query} Openings", "company": "Multiple Employers",
+        "location": "India", "salary": "N/A",
+        "url": f"https://apna.co/jobs/{q_dash}",
+        "scraped_at": today, "priority": False, "rank": 0})
+
     for seniority in ["Lead", "Principal"]:
+        records.append({"source": "TimesJobs", "region": "India",
+            "title": f"{seniority} {query} (Senior Role)", "company": "Multiple Employers",
+            "location": "India", "salary": "N/A",
+            "url": (f"http://www.timesjobs.com/candidate/job-search.html"
+                    f"?searchType=personalizedSearch&from=submit"
+                    f"&txtKeywords={seniority}+{q_plus}&txtLocation=India"
+                    f"&experienceRanges=15%7C20%7C25%7C30"),
+            "scraped_at": today, "priority": False, "rank": 0})
+
+    # ── Gulf / International specialist boards ───────────────────────────────
+    records.append({"source": "NaukriGulf", "region": "UAE",
+        "title": f"Senior / Lead {query} – Gulf Region", "company": "Multiple Employers",
+        "location": "Gulf", "salary": "N/A",
+        "url": f"https://www.naukrigulf.com/{q_dash}-jobs",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "GulfTalent", "region": "UAE",
+        "title": f"Lead {query} – UAE / Qatar / KSA", "company": "Multiple Employers",
+        "location": "Gulf", "salary": "N/A",
+        "url": f"https://www.gulftalent.com/jobs/keywords/{q_dash}",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "Bayt", "region": "UAE",
+        "title": f"Principal / Senior {query} – Middle East", "company": "Multiple Employers",
+        "location": "Gulf", "salary": "N/A",
+        "url": f"https://www.bayt.com/en/international/jobs/{q_dash}-jobs/",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "Jobstreet", "region": "Malaysia",
+        "title": f"Lead {query} – Malaysia / Singapore", "company": "Multiple Employers",
+        "location": "Malaysia", "salary": "N/A",
+        "url": f"https://www.jobstreet.com.my/en/job-search/{q_dash}-jobs/",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    # ── Oil & Gas specialist boards ──────────────────────────────────────────
+    records.append({"source": "Rigzone", "region": "UK",
+        "title": f"Senior / Lead {query} – Rigzone", "company": "Multiple Employers",
+        "location": "Global", "salary": "N/A",
+        "url": f"https://www.rigzone.com/oil/jobs/search/?k={q_plus}&t=2",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "EnergyJobSearch", "region": "UK",
+        "title": f"Lead / Principal {query} – Energy Sector", "company": "Multiple Employers",
+        "location": "Global", "salary": "N/A",
+        "url": f"https://www.energyjobsearch.com/jobs/?keywords={q_plus}&experience=senior",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "OilCareers / Airswift", "region": "UK",
+        "title": f"Senior {query} – Airswift Network", "company": "Airswift",
+        "location": "Global", "salary": "N/A",
+        "url": f"https://jobs.airswift.com/jobs/?keyword={q_plus}",
+        "scraped_at": today, "priority": True, "rank": 0})
+
+    records.append({"source": "NES Fircroft", "region": "UK",
+        "title": f"Lead / Principal {query} – NES Fircroft", "company": "NES Fircroft",
+        "location": "Global", "salary": "N/A",
+        "url": f"https://www.nesfircroft.com/jobs?q={q_plus}",
+        "scraped_at": today, "priority": True, "rank": 0})
+
+    records.append({"source": "Orion Group", "region": "UK",
+        "title": f"Senior {query} – Orion Group", "company": "Orion Group",
+        "location": "Global", "salary": "N/A",
+        "url": f"https://www.orioneng.com/jobs/?search={q_plus}",
+        "scraped_at": today, "priority": True, "rank": 0})
+
+    records.append({"source": "TRS Staffing", "region": "UK",
+        "title": f"Lead {query} – TRS Staffing", "company": "TRS Staffing",
+        "location": "Global", "salary": "N/A",
+        "url": f"https://www.trsstaffing.com/jobs/?search={q_plus}",
+        "scraped_at": today, "priority": True, "rank": 0})
+
+    records.append({"source": "CV-Library", "region": "UK",
+        "title": f"Senior / Lead {query} – CV-Library", "company": "Multiple Employers",
+        "location": "UK", "salary": "N/A",
+        "url": f"https://www.cv-library.co.uk/search-jobs?q={q_plus}&geo=United+Kingdom&exp=10",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    records.append({"source": "EngineeringJobs UK", "region": "UK",
+        "title": f"Lead {query} – EngineeringJobs", "company": "Multiple Employers",
+        "location": "UK", "salary": "N/A",
+        "url": f"https://www.engineeringjobs.co.uk/jobs/{q_dash}",
+        "scraped_at": today, "priority": False, "rank": 0})
+
+    # ── Priority EPC company direct portals ──────────────────────────────────
+    epc_portals = [
+        ("Worley", "Worley", "India / Global", "India",
+         "https://careers.worley.com/search/?q=piping+engineer&sortColumn=referencedate&sortDirection=desc"),
+        ("KBR", "KBR", "Global", "UK",
+         "https://careers.kbr.com/us/en/search-results?keywords=piping+engineer"),
+        ("McDermott", "McDermott International", "Global", "UAE",
+         "https://www.mcdermott.com/Careers"),
+        ("Wood PLC", "Wood PLC", "Global", "UK",
+         "https://careers.woodplc.com/jobs?q=piping"),
+        ("Saipem", "Saipem", "Global", "UAE",
+         "https://www.saipem.com/en/work-with-us/search-jobs?q=piping"),
+        ("Jacobs", "Jacobs", "Global", "UK",
+         "https://careers.jacobs.com/en_US/careers/SearchJobs/piping"),
+        ("AECOM", "AECOM", "Global", "UK",
+         "https://aecom.jobs/search/?q=piping+engineer"),
+        ("Bechtel", "Bechtel", "Global", "UAE",
+         "https://www.bechtel.com/careers/"),
+        ("Penspen", "Penspen", "Global", "UK",
+         "https://www.penspen.com/careers/"),
+        ("AtkinsRéalis", "AtkinsRéalis", "Global", "UK",
+         "https://careers.atkinsrealis.com/search/?q=piping"),
+        ("GAIL", "GAIL India", "India", "India",
+         "https://www.gailonline.com/final_html/EmploymentOpportunities.html"),
+        ("ONGC", "ONGC", "India", "India",
+         "https://ongcindia.com/wps/wcm/connect/en/career/"),
+        ("Petronet LNG", "Petronet LNG", "India", "India",
+         "https://www.petronetlng.com/career.aspx"),
+        ("Technip Energies", "Technip Energies India", "India", "India",
+         "https://jobs.technipenergies.com/go/Engineering/3868900/"),
+        ("TCE Careers", "Tata Consulting Engineers", "India", "India",
+         "https://www.tce.co.in/careers"),
+        ("L&T Hydrocarbon", "L&T Hydrocarbon Engineering", "India", "India",
+         "https://www.lntecc.com/careers/"),
+        ("EIL (PSU)", "Engineers India Limited", "India", "India",
+         "https://www.engineersindia.com/career"),
+        ("IOCL (PSU)", "Indian Oil Corporation", "India", "India",
+         "https://iocl.com/careers"),
+    ]
+
+    for source, company, location, region, portal_url in epc_portals:
         records.append({
-            "source":     "TimesJobs",
-            "region":     "India",
-            "title":      f"{seniority} {query} (Senior Role)",
-            "company":    "Multiple Employers",
-            "location":   "India",
+            "source":     source,
+            "region":     region,
+            "title":      f"Lead / Senior {query} – Direct Portal",
+            "company":    company,
+            "location":   location,
             "salary":     "N/A",
-            "url":        (
-                f"http://www.timesjobs.com/candidate/job-search.html"
-                f"?searchType=personalizedSearch&from=submit"
-                f"&txtKeywords={seniority}+{q_plus}"
-                f"&txtLocation=India"
-                f"&experienceRanges=15%7C20%7C25%7C30"
-            ),
+            "url":        portal_url,
             "scraped_at": today,
+            "priority":   True,
+            "rank":       0,
         })
-
-    # ── 4. TCE (Tata Consulting Engineers) ───────────────────────────────────
-    # FIX: careers.tce.co.in has hostname mismatch → use tce.co.in/careers
-    for title, loc in [
-        (f"Manager – {query}", "Noida"),
-        (f"Lead Engineer – {query}", "Mumbai"),
-        (f"Senior Engineer – {query} Design", "Bengaluru"),
-    ]:
-        records.append({
-            "source":     "TCE Careers",
-            "region":     "India",
-            "title":      title,
-            "company":    "Tata Consulting Engineers (TCE)",
-            "location":   f"{loc}, India",
-            "salary":     "N/A",
-            "url":        "https://www.tce.co.in/careers",
-            "scraped_at": today,
-        })
-
-    # ── 5. Technip Energies India ────────────────────────────────────────────
-    # FIX: previous URL resolved to ten.com (wrong company).
-    # Correct URL: jobs.technipenergies.com
-    for title, loc in [
-        (f"Lead Engineer – {query} Design Checker", "Ahmedabad"),
-        (f"Lead {query} (20+ yrs)", "Noida"),
-    ]:
-        records.append({
-            "source":     "Technip Energies",
-            "region":     "India",
-            "title":      title,
-            "company":    "Technip Energies India",
-            "location":   f"{loc}, India",
-            "salary":     "N/A",
-            "url":        "https://jobs.technipenergies.com/go/Engineering/3868900/",
-            "scraped_at": today,
-        })
-
-    # ── 6. L&T Hydrocarbon Engineering ───────────────────────────────────────
-    # FIX: lthydrocarbon.com is DNS dead. Replaced with L&T ECC careers page.
-    records.append({
-        "source":     "L&T Hydrocarbon",
-        "region":     "India",
-        "title":      f"Lead / Senior {query} – Lateral Hire",
-        "company":    "L&T Hydrocarbon Engineering",
-        "location":   "Mumbai / Vadodara, India",
-        "salary":     "N/A",
-        "url":        "https://www.lntecc.com/careers/",
-        "scraped_at": today,
-    })
-
-    # ── 7. EIL — Engineers India Limited (PSU) ───────────────────────────────
-    # FIX: /career/applying-to-eil returned 404 → use /career directly
-    records.append({
-        "source":     "EIL (PSU)",
-        "region":     "India",
-        "title":      f"Chief Engineer / Senior Engineer – {query} (Lateral Entry, Grade D–G)",
-        "company":    "Engineers India Limited",
-        "location":   "New Delhi, India",
-        "salary":     "N/A",
-        "url":        "https://www.engineersindia.com/career",
-        "scraped_at": today,
-    })
-
-    # ── 8. IOCL — Indian Oil Corporation (PSU) ───────────────────────────────
-    # ✅ Working fine (HTTP 307 redirect is normal) — no change needed
-    records.append({
-        "source":     "IOCL (PSU)",
-        "region":     "India",
-        "title":      f"Experienced Professional – {query} (Lateral Entry)",
-        "company":    "Indian Oil Corporation Limited",
-        "location":   "New Delhi / Noida, India",
-        "salary":     "N/A",
-        "url":        "https://iocl.com/careers",
-        "scraped_at": today,
-    })
 
     filtered = [r for r in records if TITLE_KEYWORDS.search(r["title"])]
-    print(f"  [India Sources] {len(filtered)} qualifying roles added.")
+    print(f"  [India+Sites] {len(filtered)} qualifying roles added.")
     return filtered
 
 
@@ -456,12 +511,6 @@ def fetch_indian_sources(query: str = "Piping Engineer") -> list[dict]:
 # ORCHESTRATOR
 # ─────────────────────────────────────────────
 async def main(query: str = "Senior Piping Engineer") -> pd.DataFrame:
-    """
-    BUG FIX: Previously the UI was passing "Senior Piping Engineer" as the
-    default value AND the user's text_input default was also "Senior Piping Engineer",
-    causing the query to be concatenated as "Senior Piping EngineerPiping Engineer".
-    Now `query` is used exactly as passed — no prefix added.
-    """
     adzuna_id  = st.secrets.get("adzuna", {}).get("app_id", "")
     adzuna_key = st.secrets.get("adzuna", {}).get("app_key", "")
     jooble_key = st.secrets.get("jooble", {}).get("api_key", "")
@@ -471,22 +520,26 @@ async def main(query: str = "Senior Piping Engineer") -> pd.DataFrame:
     async with httpx.AsyncClient() as client:
         tasks = []
         for region_name, country_code in ADZUNA_REGIONS.items():
-            tasks.append(fetch_adzuna(client, country_code, region_name,
-                                      adzuna_id, adzuna_key, query))
+            tasks.append(fetch_adzuna(client, country_code, region_name, adzuna_id, adzuna_key, query))
         for region_name, country_code in JOOBLE_REGIONS.items():
-            tasks.append(fetch_jooble(client, country_code, region_name,
-                                      jooble_key, query))
+            tasks.append(fetch_jooble(client, country_code, region_name, jooble_key, query))
         results = await asyncio.gather(*tasks)
 
     for batch in results:
         all_results.extend(batch)
 
     all_results.extend(fetch_indian_sources(query))
-    all_results.extend(fetch_indeed(query))     # ← ADD THIS LINE
+    all_results.extend(fetch_indeed(query))
 
     df = pd.DataFrame(all_results)
     if df.empty:
         return df
+
+    # Ensure rank and priority columns always exist
+    if "rank" not in df.columns:
+        df["rank"] = 2
+    if "priority" not in df.columns:
+        df["priority"] = False
 
     df.drop_duplicates(inplace=True)
     df.drop_duplicates(subset=["title", "company", "location"], keep="first", inplace=True)
@@ -494,6 +547,6 @@ async def main(query: str = "Senior Piping Engineer") -> pd.DataFrame:
         df[col] = df[col].astype(str).str.strip()
     df["title"] = df["title"].str.title()
     df.replace(r"^\s*$", "N/A", regex=True, inplace=True)
-    df = df[["source", "region", "title", "company", "location", "salary", "url", "scraped_at"]]
+    df = df[["source", "region", "title", "company", "location", "salary", "url", "scraped_at", "rank", "priority"]]
     df.reset_index(drop=True, inplace=True)
     return df
